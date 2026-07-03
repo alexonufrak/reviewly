@@ -194,7 +194,7 @@ jobs:
             changed=0
             for old in "${!MAP[@]}"; do
               if grep -qF "$old" latest.json; then
-                python3 -c "import sys; p='latest.json'; open(p,'w').write(open(p).read().replace(sys.argv[1], sys.argv[2]))" "$old" "${MAP[$old]}"
+                python3 -c "import sys; p='latest.json'; s=open(p).read(); open(p,'w').write(s.replace(sys.argv[1], sys.argv[2]))" "$old" "${MAP[$old]}"
                 changed=1
               fi
             done
