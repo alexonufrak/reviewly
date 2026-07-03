@@ -96,6 +96,8 @@ fn cli_path() -> &'static str {
             "/opt/homebrew/sbin",
             "/usr/local/bin",
             "/usr/local/sbin",
+            "/opt/local/bin",
+            "/opt/local/sbin",
             "/usr/bin",
             "/bin",
         ] {
@@ -119,7 +121,9 @@ fn cli_path() -> &'static str {
 
 /// A `Command` for a CLI tool, with PATH widened to the usual install dirs so it
 /// resolves even when the app was launched from Finder/Dock (see `cli_path`).
-fn cli_command(bin: &str) -> Command {
+/// Shared with `git`/`gh` spawns in the git & auth commands — a GUI launch
+/// hides Homebrew's bin dir, which is why an installed `gh` looked "not found".
+pub(crate) fn cli_command(bin: &str) -> Command {
     let mut cmd = Command::new(bin);
     cmd.env("PATH", cli_path());
     cmd

@@ -72,12 +72,14 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useBlocker, useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowRight,
+  Check,
   CheckCheck,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Code2,
   Columns2,
+  Copy,
   Download,
   ExternalLink,
   Files,
@@ -1930,13 +1932,42 @@ function CommitsTab({ owner, repo, number }: { owner: string; repo: string; numb
             <span className="shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               {c.commit.author?.name} · {relativeTime(c.commit.author?.date)}
             </span>
-            <code className="shrink-0 font-mono text-xs text-muted-foreground">
-              {c.sha.slice(0, 7)}
-            </code>
+            <CommitSha sha={c.sha} />
           </li>
         ))}
       </ul>
     </ScrollArea>
+  );
+}
+
+/** The commit short-SHA, click to copy the full hash. Shows a copy glyph on row
+ *  hover and a brief check on success. */
+function CommitSha({ sha }: { sha: string }) {
+  const [copied, setCopied] = useState(false);
+  const short = sha.slice(0, 7);
+  return (
+    <button
+      type="button"
+      title="Copy commit SHA"
+      aria-label={`Copy commit ${short}`}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(sha);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        } catch {
+          toast.error("Couldn't copy the SHA");
+        }
+      }}
+      className="flex shrink-0 cursor-pointer items-center gap-1 rounded font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {copied ? (
+        <Check className="size-3 text-success" />
+      ) : (
+        <Copy className="size-3 opacity-0 transition-opacity group-hover:opacity-100" />
+      )}
+      {short}
+    </button>
   );
 }
 

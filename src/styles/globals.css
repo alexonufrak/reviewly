@@ -273,7 +273,12 @@
     -moz-osx-font-smoothing: grayscale;
     font-optical-sizing: auto;
     color: var(--color-foreground);
+    /* WKWebView (macOS) honours the prefixed property — without it the whole
+       app defaults to selectable, leaking the chrome (title, metadata, labels,
+       section headings) into selections. The opt-in rules below re-enable real
+       content. */
     user-select: none;
+    -webkit-user-select: none;
     background: radial-gradient(
         ellipse 60% 55% at 0% 0%,
         rgba(255, 255, 255, 0.09),
@@ -347,6 +352,37 @@
   .prose-reviewly {
     user-select: text;
     -webkit-user-select: text;
+  }
+
+  /* Aggressive selection: interactive chrome, icons and decorative bits never
+     join a text selection — even inside a selectable region — so a drag/copy
+     grabs the prose/code, not the UI around it. Anything that wants to be
+     copied is real content (rule above) or an input field. */
+  button,
+  button *,
+  [role="button"],
+  [role="tab"],
+  [role="radio"],
+  [role="menuitem"],
+  [role="switch"],
+  [role="option"],
+  label,
+  svg,
+  [aria-hidden="true"] {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* No ring effects anywhere: zero the Tailwind ring-shadow vars app-wide so
+     every `ring-*` utility (focus glows, accent rings, hairline ring-borders)
+     renders nothing. Real `shadow-*` and `before:shadow-[…]` bevels use a
+     different var and are untouched; inputs/selects still indicate focus via
+     their `border-ring` colour change (a border, not a ring). */
+  *,
+  ::before,
+  ::after {
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
   }
 
   /* Manual "Reduce motion" toggle (Settings → Appearance). Mirrors what the OS

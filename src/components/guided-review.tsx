@@ -154,15 +154,19 @@ export function GuidedReview({
       .catch(() => {});
   }, [prKey]);
 
+  // The PR's local clone path (if checked out) — lets the agent read the repo
+  // for both the tour and the per-step AI checks.
+  const cwd = useMemo(() => {
+    const [owner, repo] = prKey.split("#")[0].split("/");
+    return localRepos.find((r) => r.owner === owner && r.repo === repo)?.path ?? null;
+  }, [prKey, localRepos]);
+
   // Kick off generation in the background task. It keeps running (and lands the
   // result via the app-wide `ai:done` listener) regardless of this component.
   const start = useCallback(() => {
     const custom = aiInstructions.trim()
       ? `\n\n# Reviewer's instructions\n${aiInstructions.trim()}`
       : "";
-    // Run inside the PR's local clone (if present) so the agent can read the repo.
-    const [owner, repo] = prKey.split("#")[0].split("/");
-    const cwd = localRepos.find((r) => r.owner === owner && r.repo === repo)?.path ?? null;
     useGuidedGen.getState().start(prKey);
     invoke("ai_review_bg", {
       key: prKey,
@@ -171,7 +175,7 @@ export function GuidedReview({
       cwd,
       prompt: `${GUIDED_SYSTEM}${custom}\n\n# Pull request\n${context}`,
     }).catch((e) => useGuidedGen.getState().fail(prKey, String(e)));
-  }, [prKey, headSha, aiInstructions, context, localRepos]);
+  }, [prKey, headSha, aiInstructions, context, cwd]);
 
   // Auto-start the tour on first open when the reviewer opted in (Settings →
   // Guided tour). Guarded so it fires at most once per PR and never when a tour
@@ -462,6 +466,31 @@ function Tour({
   const setLastActive = useGuided((s) => s.setLastActive);
   const dismiss = useGuided((s) => s.dismiss);
   const restoreDismissed = useGuided((s) => s.restoreDismissed);
+  const localRepos = useLocalRepos((s) => s.repos);
+  // The PR's local clone path — gives the per-step AI check real code to read
+  // against (the "Check with AI" button only appears when this exists).
+  const cwd = useMemo(() => {
+    const [owner, repo] = prKey.split("#")[0].split("/");
+    return localRepos.find((r) => r.owner === owner && r.repo === repo)?.path ?? null;
+  }, [prKey, localRepos]);
+  // Verify one concern against the clone; the Step auto-dismisses (resolved) or
+  // refines the comment (valid) from the result.
+  const checkWithAI = useCallback(
+    async (step: GuidedStep): Promise<CheckResult | null> => {
+      try {
+        const out = await invoke<string>("ai_review", {
+          ...aiInvokeArgs(),
+          cwd,
+          prompt: checkPrompt(step),
+        });
+        return parseCheckResult(out);
+      } catch (e) {
+        toast.error(`AI check failed — ${String(e)}`);
+        return null;
+      }
+    },
+    [cwd],
+  );
   const [active, setActive] = useState(() => Math.min(entry.lastActive, total - 1));
   const [posted, setPosted] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<StepKind | null>(null);
@@ -838,7 +867,7 @@ function Tour({
                   type="button"
                   onClick={() => jumpTo(i)}
                   className={cn(
-                    "group flex w-full gap-2.5 rounded-md pr-2 text-left transition-colors hover:bg-foreground/[0.03]",
+                    "group flex w-full gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-foreground/[0.04]",
                     isActive && "bg-foreground/[0.05]",
                   )}
                 >
@@ -884,10 +913,10 @@ function Tour({
                       )}
                     />
                   </span>
-                  <span className="min-w-0 flex-1 py-2">
+                  <span className="min-w-0 flex-1 py-2.5">
                     <span
                       className={cn(
-                        "mb-0.5 block text-[10px] font-medium uppercase leading-none tracking-wide",
+                        "mb-1 block text-[10px] font-medium uppercase leading-none tracking-wide",
                         K.text,
                         !isActive && "opacity-55",
                       )}
@@ -945,6 +974,7 @@ function Tour({
                     ? (body) => onPostComment({ path: step.path, line: step.line, body })
                     : undefined
                 }
+                onCheckAI={cwd ? checkWithAI : undefined}
                 onDismiss={() => dismiss(prKey, i)}
                 onOpenFile={onOpenFile}
               />
@@ -977,6 +1007,49 @@ function Tour({
   );
 }
 
+/** Verdict the per-step "Check with AI" returns. */
+type CheckResult = { verdict: "resolved" | "valid"; finding: string };
+
+/** Ask the agent to verify ONE concern against the repo it runs in. */
+function checkPrompt(step: GuidedStep): string {
+  const loc = `${step.path}:${step.line}${step.endLine ? `-${step.endLine}` : ""}`;
+  return [
+    "You are verifying ONE code-review concern against the actual repository in this working directory. Read the relevant files to check it — don't guess.",
+    "",
+    `Concern (${step.kind}) at ${loc}`,
+    `Title: ${step.title}`,
+    step.detail ? `Details: ${step.detail}` : "",
+    step.suggestion ? `Proposed review comment: ${step.suggestion}` : "",
+    "",
+    "Decide:",
+    '- "resolved": NOT worth raising — false alarm, already handled, or not actually an issue.',
+    '- "valid": a real concern worth a comment.',
+    "",
+    "Reply with ONLY a single-line JSON object — no prose, no code fences:",
+    '{"verdict":"resolved"|"valid","finding":"<1-2 sentences; if valid, a sharp ready-to-post comment>"}',
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Pull the verdict JSON from the agent's (possibly chatty) reply. Unparseable
+ *  output is treated as "valid" so we never auto-dismiss on ambiguity. */
+function parseCheckResult(out: string): CheckResult {
+  const m = out.match(/\{[\s\S]*\}/);
+  if (m) {
+    try {
+      const o = JSON.parse(m[0]) as { verdict?: unknown; finding?: unknown };
+      return {
+        verdict: o.verdict === "resolved" ? "resolved" : "valid",
+        finding: typeof o.finding === "string" && o.finding.trim() ? o.finding.trim() : out.trim(),
+      };
+    } catch {
+      /* fall through to raw-text fallback */
+    }
+  }
+  return { verdict: "valid", finding: out.trim() };
+}
+
 const Step = ({
   setRef,
   step,
@@ -986,6 +1059,7 @@ const Step = ({
   posted,
   onAdd,
   onPost,
+  onCheckAI,
   onDismiss,
   onOpenFile,
 }: {
@@ -998,6 +1072,8 @@ const Step = ({
   posted: boolean;
   onAdd: (body: string) => void;
   onPost?: (body: string) => Promise<void>;
+  /** Verify this concern against the local clone (concern/question kinds). */
+  onCheckAI?: (step: GuidedStep) => Promise<CheckResult | null>;
   onDismiss?: () => void;
   onOpenFile: (path: string, line?: number) => void;
 }) => {
@@ -1005,6 +1081,24 @@ const Step = ({
   const Icon = kind.icon;
   const [posting, setPosting] = useState(false);
   const [postedGh, setPostedGh] = useState(false);
+  const [checking, setChecking] = useState(false);
+  // The AI's verdict + finding from "Check with AI", kept so the reasoning is
+  // always shown — a cleared concern is never dismissed as a black box. On
+  // "valid" the finding is a sharper comment that replaces the suggestion.
+  const [result, setResult] = useState<CheckResult | null>(null);
+  const refined = result?.verdict === "valid" ? result.finding : null;
+  const checkable = !!onCheckAI && (step.kind === "concern" || step.kind === "question");
+
+  async function runCheck() {
+    if (!onCheckAI || checking) return;
+    setChecking(true);
+    try {
+      const r = await onCheckAI(step);
+      if (r) setResult(r);
+    } finally {
+      setChecking(false);
+    }
+  }
   // Posting to GitHub is only an option when onPost is wired; the setting only
   // chooses which of the two is the primary (vs secondary) button.
   const canPost = !!onPost;
@@ -1073,10 +1167,49 @@ const Step = ({
           <MarkdownBody className="mt-3 text-xs text-foreground/90">{step.detail}</MarkdownBody>
         )}
 
-        {step.suggestion != null && (
+        {checkable && !result && (
+          <div className="mt-3">
+            <Button size="xs" variant="secondary" loading={checking} onClick={runCheck}>
+              <Sparkles className="size-3 text-info" />
+              Check with AI
+            </Button>
+          </div>
+        )}
+
+        {/* Cleared: show the AI's reasoning and let the reviewer close it (or
+            keep it if they disagree) — never a silent black-box dismiss. */}
+        {result?.verdict === "resolved" && (
+          <div className="mt-3 rounded-lg border border-success/25 bg-success/[0.06] p-3">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-success">
+              <Check className="size-3.5" />
+              AI looked into this — not worth raising
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed text-foreground/80">{result.finding}</p>
+            <div className="mt-2.5 flex items-center justify-end gap-1.5">
+              <Button size="xs" variant="ghost" onClick={() => setResult(null)}>
+                Keep it
+              </Button>
+              {onDismiss && (
+                <Button size="xs" variant="secondary" onClick={onDismiss}>
+                  Dismiss stop
+                  <X className="size-3" />
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {result?.verdict === "valid" && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs text-info">
+            <Sparkles className="size-3" />
+            AI verified it — refined the comment below.
+          </p>
+        )}
+
+        {result?.verdict !== "resolved" && (step.suggestion != null || refined != null) && (
           <Composer
             className="mt-3"
-            initialValue={step.suggestion}
+            initialValue={refined ?? step.suggestion ?? ""}
             rows={3}
             header={
               <span className="inline-flex items-center gap-1.5 font-medium text-muted-foreground">

@@ -16,7 +16,7 @@ const GIT_NET_TIMEOUT: Duration = Duration::from_secs(180);
 /// Shells out to the system `git` (same approach as the AI CLIs) — no extra
 /// plugin/capability.
 async fn run_git(path: &str, args: &[&str], timeout: Duration) -> AppResult<String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::commands::ai::cli_command("git");
     cmd.arg("-C").arg(path);
     for a in args {
         cmd.arg(a);
@@ -77,7 +77,11 @@ pub async fn git_clone(url: String, parent_dir: String) -> AppResult<String> {
     let dest_str = dest.to_string_lossy().to_string();
     let out = tokio::time::timeout(
         CLONE_TIMEOUT,
-        Command::new("git").arg("clone").arg(url.trim()).arg(&dest_str).output(),
+        crate::commands::ai::cli_command("git")
+            .arg("clone")
+            .arg(url.trim())
+            .arg(&dest_str)
+            .output(),
     )
     .await
     .map_err(|_| AppError::Other("git clone timed out".into()))?
@@ -131,6 +135,41 @@ pub async fn read_file(path: String) -> AppResult<String> {
         return Err(AppError::Other("binary file".into()));
     }
     String::from_utf8(bytes).map_err(|_| AppError::Other("file is not valid UTF-8".into()))
+}
+
+const MAX_IMAGE_BYTES: u64 = 16_000_000;
+
+/// Read a small image file and return it as a `data:<mime>;base64,…` URL the UI
+/// can drop straight into an `<img src>`. The text `read_file` rejects these
+/// (null bytes) — this is the image-preview path. MIME is inferred from the
+/// extension; unknown types fall back to octet-stream.
+#[tauri::command]
+pub async fn read_file_data_url(path: String) -> AppResult<String> {
+    let meta = std::fs::metadata(&path).map_err(|e| AppError::Other(format!("stat: {e}")))?;
+    if meta.len() > MAX_IMAGE_BYTES {
+        return Err(AppError::Other("image too large to preview".into()));
+    }
+    let mime = match std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        Some("avif") => "image/avif",
+        Some("ico") => "image/x-icon",
+        _ => "application/octet-stream",
+    };
+    let bytes = std::fs::read(&path).map_err(|e| AppError::Other(format!("read: {e}")))?;
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 #[derive(Serialize)]
@@ -189,7 +228,7 @@ pub async fn git_worktrees(path: String) -> AppResult<Vec<Worktree>> {
 
 /// Run `gh` inside a repo dir (it handles GitHub auth/credentials).
 async fn gh(path: &str, args: &[&str]) -> AppResult<String> {
-    let mut cmd = Command::new("gh");
+    let mut cmd = crate::commands::ai::cli_command("gh");
     cmd.current_dir(path);
     for a in args {
         cmd.arg(a);
@@ -991,7 +1030,7 @@ pub struct LocalEditorTarget {
 }
 
 async fn command_available(bin: &str) -> bool {
-    Command::new("which")
+    crate::commands::ai::cli_command("which")
         .arg(bin)
         .output()
         .await
@@ -1267,7 +1306,7 @@ pub async fn open_local_editor(path: String, target_id: String) -> AppResult<()>
         .ok_or_else(|| AppError::Other("editor is not installed".into()))?;
 
     if let Some(cmd) = target.command {
-        Command::new(cmd)
+        crate::commands::ai::cli_command(&cmd)
             .arg(path)
             .spawn()
             .map_err(|e| AppError::Other(format!("failed to open editor: {e}")))?;

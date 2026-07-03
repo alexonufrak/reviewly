@@ -72,7 +72,7 @@ export function LabelPicker({ owner, repo, number, current, onChange }: Props) {
       </Button>
 
       {open && (
-        <PopoverPanel onClose={() => setOpen(false)} align="left" width="w-64">
+        <PopoverPanel onClose={() => setOpen(false)} align="left" width="w-64" portal>
           <Input
             autoFocus
             value={filter}

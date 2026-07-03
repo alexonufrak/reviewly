@@ -1,6 +1,5 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use tokio::process::Command;
 
 use crate::auth::device::{self, DeviceStart};
 use crate::clients::github;
@@ -61,7 +60,12 @@ pub fn auth_sign_out(app: AppHandle) -> AppResult<()> {
 /// Whether the local `gh` CLI is installed and authenticated.
 #[tauri::command]
 pub async fn auth_gh_available() -> bool {
-    let Ok(output) = Command::new("gh").arg("auth").arg("status").output().await else {
+    let Ok(output) = crate::commands::ai::cli_command("gh")
+        .arg("auth")
+        .arg("status")
+        .output()
+        .await
+    else {
         return false;
     };
     output.status.success()
@@ -74,7 +78,7 @@ pub async fn auth_use_gh_cli(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<github::Viewer> {
-    let output = Command::new("gh")
+    let output = crate::commands::ai::cli_command("gh")
         .arg("auth")
         .arg("token")
         .output()

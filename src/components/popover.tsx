@@ -1,6 +1,14 @@
 import { cn } from "@/lib/utils";
 import { Check, type LucideIcon } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 
 /**
  * The app's standard floating panel + click-outside backdrop. Use inside a
@@ -15,6 +23,7 @@ export function PopoverPanel({
   width = "w-64",
   className,
   children,
+  portal = false,
 }: {
   onClose: () => void;
   align?: "left" | "right";
@@ -22,6 +31,14 @@ export function PopoverPanel({
   width?: string;
   className?: string;
   children: ReactNode;
+  /**
+   * Render the panel in a `document.body` portal with fixed positioning,
+   * anchored to its trigger. Use when an ancestor would otherwise clip or
+   * stack-trap the panel — e.g. a collapsing header with `overflow-hidden` +
+   * a transform (the PR header's metadata row). Off by default so every other
+   * dropdown keeps its simple in-flow `absolute` placement.
+   */
+  portal?: boolean;
 }) {
   // Capture the trigger on open; restore focus to it when the panel closes so
   // keyboard users aren't dumped to the top of the page after any dropdown.
@@ -42,6 +59,79 @@ export function PopoverPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Portal mode: a zero-size in-flow anchor lets us measure the trigger
+  // container, then we position the floating panel with `fixed` coords and
+  // keep them in sync on scroll/resize.
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [coords, setCoords] = useState<{
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (!portal) return;
+    const place = () => {
+      const host = anchorRef.current?.parentElement;
+      if (!host) return;
+      const r = host.getBoundingClientRect();
+      setCoords({
+        top: side === "bottom" ? r.bottom + 4 : undefined,
+        bottom: side === "top" ? window.innerHeight - r.top + 4 : undefined,
+        left: align === "left" ? r.left : undefined,
+        right: align === "right" ? window.innerWidth - r.right : undefined,
+      });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [portal, side, align]);
+
+  const backdrop = (
+    <button
+      type="button"
+      aria-hidden
+      tabIndex={-1}
+      onClick={onClose}
+      className="fixed inset-0 cursor-default"
+      style={portal ? { zIndex: 59 } : undefined}
+    />
+  );
+  const panel = (
+    <div
+      className={cn(
+        "rounded-lg border border-hairline bg-popover/90 p-2 shadow-xl backdrop-blur-xl",
+        portal ? "fixed" : "absolute z-30",
+        !portal && (side === "top" ? "bottom-full mb-1" : "top-full mt-1"),
+        !portal && (align === "right" ? "right-0" : "left-0"),
+        width,
+        className,
+      )}
+      style={portal ? { zIndex: 60, ...coords } : undefined}
+    >
+      {children}
+    </div>
+  );
+
+  if (portal) {
+    return (
+      <>
+        <span ref={anchorRef} className="hidden" aria-hidden />
+        {createPortal(
+          <>
+            {backdrop}
+            {coords && panel}
+          </>,
+          document.body,
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       <button
@@ -51,17 +141,7 @@ export function PopoverPanel({
         onClick={onClose}
         className="fixed inset-0 z-20 cursor-default"
       />
-      <div
-        className={cn(
-          "absolute z-30 rounded-lg border border-hairline bg-popover/90 p-2 shadow-xl backdrop-blur-xl",
-          side === "top" ? "bottom-full mb-1" : "top-full mt-1",
-          align === "right" ? "right-0" : "left-0",
-          width,
-          className,
-        )}
-      >
-        {children}
-      </div>
+      {panel}
     </>
   );
 }

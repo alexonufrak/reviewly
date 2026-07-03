@@ -286,6 +286,7 @@ pub fn run() {
             commands::git::git_clone,
             commands::git::list_dir,
             commands::git::read_file,
+            commands::git::read_file_data_url,
             commands::git::git_branches,
             commands::git::git_checkout,
             commands::git::git_worktrees,
