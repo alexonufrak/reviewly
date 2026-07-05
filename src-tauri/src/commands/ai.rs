@@ -46,10 +46,10 @@ async fn run_provider(
     api_key: Option<String>,
 ) -> AppResult<String> {
     match provider {
-        "codex" => run_codex(prompt, cwd).await,
-        "gemini" => run_gemini(prompt, cwd).await,
+        "codex" => run_codex(prompt, cwd, model.as_deref()).await,
+        "gemini" => run_gemini(prompt, cwd, model.as_deref()).await,
         "openai" => run_openai_compatible(prompt, base_url, model, api_key).await,
-        _ => run_claude(prompt, cwd).await,
+        _ => run_claude(prompt, cwd, model.as_deref()).await,
     }
 }
 
@@ -129,6 +129,64 @@ pub(crate) fn cli_command(bin: &str) -> Command {
     cmd
 }
 
+/// Append the CLI's model flag (`--model` / `-m`) when a non-empty model
+/// override is configured. Empty/absent → the CLI keeps its own default.
+fn add_model(cmd: &mut Command, flag: &str, model: Option<&str>) {
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        cmd.arg(flag).arg(m);
+    }
+}
+
+/// Turn a CLI failure (or a success with no output) into a *helpful* error.
+/// Well-known stderr signatures — not-signed-in, rate-limit/quota, unknown
+/// model, context-length — become a friendly one-liner so the real cause
+/// reaches the user; otherwise the trailing stderr (capped) is shown, instead
+/// of a raw multi-KB dump or a silent empty parse failure downstream.
+fn cli_error(name: &str, code: &str, stderr: &str) -> AppError {
+    let low = stderr.to_lowercase();
+    let msg = if low.contains("not logged in")
+        || low.contains("authenticat")
+        || low.contains("please run")
+        || (low.contains("api key") && (low.contains("missing") || low.contains("not ")))
+    {
+        format!("{name} isn't signed in — run `{name}` once in a terminal to log in, then retry.")
+    } else if low.contains("rate limit")
+        || low.contains("quota")
+        || low.contains("429")
+        || low.contains("overloaded")
+    {
+        format!("{name} hit a rate limit or quota — wait a moment and try again.")
+    } else if low.contains("model")
+        && (low.contains("not found")
+            || low.contains("unknown")
+            || low.contains("invalid")
+            || low.contains("does not exist")
+            || low.contains("not supported"))
+    {
+        format!("The model set in Settings → AI review isn't valid for {name}.")
+    } else if (low.contains("context") && low.contains("length"))
+        || low.contains("too many tokens")
+        || low.contains("maximum context")
+        || low.contains("prompt is too long")
+    {
+        "This PR is too large for the model's context window — try a smaller PR.".to_string()
+    } else if stderr.is_empty() {
+        format!("{name} produced no output (exit {code}).")
+    } else {
+        // Errors sit at the END of a noisy stderr — keep the tail.
+        let tail: String = stderr
+            .chars()
+            .rev()
+            .take(300)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        format!("{name} exited {code}: {tail}")
+    };
+    AppError::Other(msg)
+}
+
 /// True when the selected provider's CLI is available in PATH. The OpenAI-
 /// compatible provider has no binary — it's gated on a configured base URL in
 /// the UI — so report it as available here.
@@ -180,7 +238,7 @@ pub async fn ai_review_bg(
     api_key: Option<String>,
 ) -> AppResult<()> {
     {
-        let mut set = state.ai_inflight.lock().unwrap();
+        let mut set = state.ai_inflight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if set.contains(&key) {
             return Ok(()); // already generating for this PR — don't double-spawn
         }
@@ -222,7 +280,7 @@ pub async fn ai_review_bg(
 #[tauri::command]
 pub fn ai_cancel(app: AppHandle, state: State<'_, AppState>, key: String) {
     let was_running = {
-        let mut t = state.ai_tasks.lock().unwrap();
+        let mut t = state.ai_tasks.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         match t.remove(&key) {
             Some(handle) => {
                 handle.abort();
@@ -252,16 +310,33 @@ pub fn ai_inflight(state: State<'_, AppState>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-async fn run_claude(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
+/// Feed `prompt` to a freshly-spawned child's stdin on a detached task. Writing
+/// concurrently with the child's own run avoids a deadlock when the prompt is
+/// larger than the OS pipe buffer and the child only drains stdin as it works;
+/// dropping the write handle at the end signals EOF.
+fn feed_stdin(child: &mut tokio::process::Child, prompt: &str) {
+    if let Some(mut sin) = child.stdin.take() {
+        let bytes = prompt.as_bytes().to_vec();
+        tauri::async_runtime::spawn(async move {
+            let _ = sin.write_all(&bytes).await;
+            let _ = sin.shutdown().await;
+        });
+    }
+}
+
+async fn run_claude(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppResult<String> {
     let mut cmd = cli_command("claude");
+    // Prompt goes over stdin, not argv: a large PR context could otherwise hit
+    // the OS arg-length limit, while stdin has no such ceiling. `claude -p`
+    // reads the query from stdin when no positional prompt is given.
     cmd.arg("-p")
-        .arg(prompt)
         .arg("--output-format")
         .arg("text")
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    add_model(&mut cmd, "--model", model);
     // With the PR's local clone present, let the review READ the repo
     // (read-only — no edits, no shell) so it can resolve its own questions from
     // the actual code instead of reasoning off the diff alone. Without a clone
@@ -270,9 +345,10 @@ async fn run_claude(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
         cmd.arg("--allowedTools").arg("Read Grep Glob LS");
     }
     apply_cwd(&mut cmd, cwd);
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| AppError::Other(format!("failed to spawn claude: {e}")))?;
+    feed_stdin(&mut child, prompt);
 
     let timeout = run_timeout(cwd);
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
@@ -287,13 +363,21 @@ async fn run_claude(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
     };
 
     if !output.status.success() {
-        return Err(AppError::Other(format!(
-            "claude exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+        return Err(cli_error(
+            "claude",
+            &output.status.to_string(),
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if out.is_empty() {
+        return Err(cli_error(
+            "claude",
+            "0",
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
+    }
+    Ok(out)
 }
 
 /// Run the Claude CLI in *apply* mode — full edit + shell access — inside `cwd`,
@@ -337,7 +421,7 @@ pub async fn apply_with_claude(prompt: &str, cwd: &str) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-async fn run_codex(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
+async fn run_codex(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppResult<String> {
     // Write only the agent's final message to a temp file so we get clean
     // markdown back instead of the interleaved progress log on stdout.
     let nanos = std::time::SystemTime::now()
@@ -355,8 +439,9 @@ async fn run_codex(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
         .arg("-s")
         .arg("read-only")
         .arg("--output-last-message")
-        .arg(&out_path)
-        .arg("-")
+        .arg(&out_path);
+    add_model(&mut cmd, "-m", model); // codex needs -m before the `-` stdin arg
+    cmd.arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -366,13 +451,7 @@ async fn run_codex(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
         .spawn()
         .map_err(|e| AppError::Other(format!("failed to spawn codex: {e}")))?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .await
-            .map_err(|e| AppError::Other(format!("write codex stdin: {e}")))?;
-        // Dropping stdin here closes it, signalling EOF.
-    }
+    feed_stdin(&mut child, prompt);
 
     let timeout = run_timeout(cwd);
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
@@ -388,23 +467,31 @@ async fn run_codex(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
 
     if !output.status.success() {
         let _ = tokio::fs::remove_file(&out_path).await;
-        return Err(AppError::Other(format!(
-            "codex exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+        return Err(cli_error(
+            "codex",
+            &output.status.to_string(),
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
     }
 
     let text = tokio::fs::read_to_string(&out_path)
         .await
         .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string());
     let _ = tokio::fs::remove_file(&out_path).await;
-    Ok(text.trim().to_string())
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err(cli_error(
+            "codex",
+            &output.status.to_string(),
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
+    }
+    Ok(text)
 }
 
 /// Gemini CLI in non-interactive mode (`gemini -p`). Drop-in like Claude/Codex;
 /// runs inside the PR clone when present so it can read the repo.
-async fn run_gemini(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
+async fn run_gemini(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppResult<String> {
     let mut cmd = cli_command("gemini");
     cmd.arg("-p")
         .arg(prompt)
@@ -412,6 +499,7 @@ async fn run_gemini(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    add_model(&mut cmd, "-m", model);
     apply_cwd(&mut cmd, cwd);
     let child = cmd
         .spawn()
@@ -427,13 +515,21 @@ async fn run_gemini(prompt: &str, cwd: Option<&str>) -> AppResult<String> {
         }
     };
     if !output.status.success() {
-        return Err(AppError::Other(format!(
-            "gemini exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+        return Err(cli_error(
+            "gemini",
+            &output.status.to_string(),
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if out.is_empty() {
+        return Err(cli_error(
+            "gemini",
+            "0",
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
+    }
+    Ok(out)
 }
 
 /// Any OpenAI-compatible chat endpoint: Ollama / LM Studio (local), OpenRouter,
@@ -530,7 +626,7 @@ pub async fn ai_stream(
     api_key: Option<String>,
 ) -> AppResult<()> {
     {
-        let mut set = state.ai_inflight.lock().unwrap();
+        let mut set = state.ai_inflight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if set.contains(&key) {
             return Ok(());
         }
@@ -587,7 +683,7 @@ async fn stream_provider(
     api_key: Option<String>,
 ) -> AppResult<(String, Option<f64>)> {
     match provider {
-        "claude" => stream_claude(app, key, prompt, cwd).await,
+        "claude" => stream_claude(app, key, prompt, cwd, model.as_deref()).await,
         "openai" => stream_openai(app, key, prompt, base_url, model, api_key).await,
         other => {
             let text = run_provider(other, prompt, cwd, base_url, model, api_key).await?;
@@ -602,22 +698,26 @@ async fn stream_claude(
     key: &str,
     prompt: &str,
     cwd: Option<&str>,
+    model: Option<&str>,
 ) -> AppResult<(String, Option<f64>)> {
     let mut cmd = cli_command("claude");
+    // Prompt over stdin (not argv) so a large PR context can't hit the OS
+    // arg-length limit — same as run_claude. Streaming stdout is unaffected.
     cmd.arg("-p")
-        .arg(prompt)
         .arg("--output-format")
         .arg("stream-json")
         .arg("--include-partial-messages")
         .arg("--verbose")
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    add_model(&mut cmd, "--model", model);
     apply_cwd(&mut cmd, cwd);
     let mut child = cmd
         .spawn()
         .map_err(|e| AppError::Other(format!("failed to spawn claude: {e}")))?;
+    feed_stdin(&mut child, prompt);
     let stdout = child
         .stdout
         .take()

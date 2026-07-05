@@ -39,6 +39,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { UserHoverCard } from "@/components/user-hover-card";
 import type { AiAction } from "@/lib/ai-actions";
 import { buildReviewContext } from "@/lib/ai/context";
+import { parsePatch } from "@/lib/diff";
 import { relativeTime } from "@/lib/format";
 import { celebrate } from "@/lib/kite-release";
 import type {
@@ -624,8 +625,31 @@ export function PRDetailPage() {
         if (a.event === "APPROVE") celebrate();
         break;
       }
-      case "inline_comment":
+      case "inline_comment": {
         if (!headSha) throw new Error("PR head commit unavailable — reload and try again.");
+        // An inline comment only sticks on a line that's actually in the diff;
+        // an off / hallucinated anchor 422s. If the line isn't commentable, fall
+        // back to a file-level comment (with the path:line in the body) so the
+        // note still lands instead of erroring out.
+        const target = fileList.find((f) => f.filename === a.path);
+        const commentable =
+          !!target?.patch &&
+          parsePatch(target.patch).some((h) =>
+            h.lines.some((l) => l.kind !== "hunk" && l.newLine === a.line),
+          );
+        if (!commentable) {
+          toast.warning(
+            `Line ${a.line} isn't in ${a.path.split("/").pop()}'s diff — posting as a file comment.`,
+          );
+          await invoke("gh_create_issue_comment", {
+            owner,
+            repo,
+            number,
+            body: `**${a.path}:${a.line}**\n\n${a.body}`,
+          });
+          qc.invalidateQueries({ queryKey: ["pull-issue-comments", owner, repo, number] });
+          break;
+        }
         await invoke("gh_create_review_comment", {
           owner,
           repo,
@@ -639,6 +663,7 @@ export function PRDetailPage() {
         qc.invalidateQueries({ queryKey: ["pull-review-comments", owner, repo, number] });
         qc.invalidateQueries({ queryKey: ["pull-review-threads-gql", owner, repo, number] });
         break;
+      }
       case "label": {
         const names = new Set(labels.map((l) => l.name));
         for (const n of a.add) names.add(n);
@@ -1678,6 +1703,15 @@ function ChecksPlaceholder() {
   );
 }
 
+/**
+ * True when a comment/review body has something to render on screen — i.e. it
+ * isn't empty, whitespace-only, or nothing but HTML comments (review bots post
+ * hidden `<!-- marker -->` bodies for their own bookkeeping).
+ */
+function hasRenderableBody(body: string | null | undefined): boolean {
+  return !!(body ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
+}
+
 function Conversation({
   owner,
   repo,
@@ -1724,8 +1758,20 @@ function Conversation({
   const gqlThreads = reviewThreads.data ?? [];
   const commentById = new Map(threads.map((t) => [t.id, t]));
 
+  // A COMMENTED review with an empty body is the wrapper GitHub creates when
+  // someone submits only inline comments — Devin and other review bots do this
+  // constantly. Its content already renders in the "Inline comments" section
+  // below, so the bare "commented" card here is empty noise; drop it. Verdict
+  // reviews (approved / changes requested) are kept even bodyless — the badge
+  // is their content. Comments that render to nothing (hidden bot markers) go
+  // too, so the timeline never shows an empty byline-and-reactions shell.
+  const visibleReviews = reviews.filter(
+    (r) => hasRenderableBody(r.body) || r.state === "APPROVED" || r.state === "CHANGES_REQUESTED",
+  );
+  const visibleComments = comments.filter((c) => hasRenderableBody(c.body));
+
   const hasContent =
-    !!description || reviews.length > 0 || threads.length > 0 || comments.length > 0;
+    !!description || visibleReviews.length > 0 || threads.length > 0 || visibleComments.length > 0;
 
   const comment = useMutation({
     mutationFn: (body: string) => invoke("gh_create_issue_comment", { owner, repo, number, body }),
@@ -1797,7 +1843,7 @@ function Conversation({
         />
       ) : (
         <>
-          {reviews.map((r) => (
+          {visibleReviews.map((r) => (
             <article
               key={r.id}
               className={cn(
@@ -1842,7 +1888,7 @@ function Conversation({
             </article>
           ))}
 
-          {comments.map((c) => (
+          {visibleComments.map((c) => (
             <article key={c.id} className="rounded-xl border border-hairline bg-card/50 p-4">
               <CommentByline className="mb-2" user={c.user} timestamp={c.created_at} />
               <MarkdownBody className="text-xs">{c.body}</MarkdownBody>

@@ -17,7 +17,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { UserHoverCard } from "@/components/user-hover-card";
 import { invoke } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import { type AiProvider, CLI_PROVIDERS, useAiProvider } from "@/stores/ai";
+import {
+  type AiProvider,
+  CLI_PROVIDERS,
+  MODEL_SUGGESTIONS,
+  PROVIDER_LABEL,
+  useAiProvider,
+} from "@/stores/ai";
 import { LANDING_OPTIONS, useAppBehavior } from "@/stores/app-behavior";
 import { ACCENTS, useAppearance } from "@/stores/appearance";
 import { useAuth } from "@/stores/auth";
@@ -200,7 +206,7 @@ export function SettingsPage() {
                 ))}
               </div>
 
-              {provider === "openai" && <OpenAiConfig />}
+              {provider === "openai" ? <OpenAiConfig /> : <CliModelConfig provider={provider} />}
 
               <AiInstructions />
             </Card>
@@ -914,6 +920,42 @@ function OpenAiField({
         className="w-full"
       />
     </label>
+  );
+}
+
+/** Free-text model override (with suggestions) for a CLI provider — sent to the
+ *  CLI as `--model`; blank keeps the CLI's own default. */
+function CliModelConfig({ provider }: { provider: AiProvider }) {
+  const value = useAiProvider((s) => s.cliModels[provider] ?? "");
+  const setCliModel = useAiProvider((s) => s.setCliModel);
+  const suggestions = MODEL_SUGGESTIONS[provider];
+  const listId = `cli-models-${provider}`;
+  return (
+    <div className="mt-2 space-y-1.5 rounded-xl border border-hairline bg-foreground/[0.02] p-3">
+      {/* biome-ignore lint/a11y/noLabelWithoutControl: Input renders the native control */}
+      <label className="block">
+        <span className="mb-1 block text-[11px] font-medium text-muted-foreground">Model</span>
+        <Input
+          value={value}
+          onChange={(e) => setCliModel(provider, e.target.value)}
+          placeholder={`${suggestions[0] ?? "default"}  ·  blank = ${PROVIDER_LABEL[provider]} default`}
+          list={listId}
+          size="sm"
+          spellCheck={false}
+          autoComplete="off"
+          className="w-full"
+        />
+      </label>
+      <datalist id={listId}>
+        {suggestions.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+      <p className="text-[11px] text-muted-foreground/80">
+        Any model id the {PROVIDER_LABEL[provider]} CLI accepts, passed as{" "}
+        <code className="font-mono text-[10px]">--model</code>. Leave blank for its default.
+      </p>
+    </div>
   );
 }
 

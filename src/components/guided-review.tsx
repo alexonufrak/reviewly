@@ -3,7 +3,7 @@ import { IconButton } from "@/components/icon-button";
 import { KiteLoader } from "@/components/kite-loader";
 import { MarkdownBody } from "@/components/markdown-body";
 import { Button } from "@/components/ui/button";
-import { GUIDED_SYSTEM } from "@/lib/ai/prompts";
+import { CLONE_ABSENT_CLAUSE, GUIDED_SYSTEM } from "@/lib/ai/prompts";
 import { useAiAvailable } from "@/lib/ai/use-ai-available";
 import { parsePatch } from "@/lib/diff";
 import { relativeTime } from "@/lib/format";
@@ -173,7 +173,9 @@ export function GuidedReview({
       ...aiInvokeArgs(),
       headSha: headSha ?? "",
       cwd,
-      prompt: `${GUIDED_SYSTEM}${custom}\n\n# Pull request\n${context}`,
+      // No local clone → the model sees only the diff; the clause forbids the
+      // unverifiable repo-wide claims that produce fabricated false alarms.
+      prompt: `${GUIDED_SYSTEM}${custom}${cwd ? "" : CLONE_ABSENT_CLAUSE}\n\n# Pull request\n${context}`,
     }).catch((e) => useGuidedGen.getState().fail(prKey, String(e)));
   }, [prKey, headSha, aiInstructions, context, cwd]);
 
@@ -273,6 +275,9 @@ function Intro({
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const pos = { x: 0, y: 0 };
     const vel = { x: 0, y: 0 };
+    // Organic idle wander: ease toward a fresh random point every ~2–4s, so the
+    // kite drifts like a light breeze instead of tracing a repeating sine.
+    const wander = { fromX: 0, fromY: 0, toX: 0, toY: 0, start: 0, dur: 0, next: 0 };
     const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
     let raf = 0;
     const tick = () => {
@@ -300,8 +305,24 @@ function Intro({
         tx = (rx / d) * reach + Math.sin(t * 1.4) * 2.5;
         ty = (ry / d) * reach + Math.cos(t * 1.8) * 2.5;
       } else {
-        tx = Math.sin(t * 0.7) * 9 + Math.sin(t * 1.9) * 3;
-        ty = Math.cos(t * 0.9) * 7 + Math.cos(t * 2.3) * 2;
+        if (t >= wander.next) {
+          wander.fromX = wander.toX;
+          wander.fromY = wander.toY;
+          wander.toX = (Math.random() * 2 - 1) * 13;
+          wander.toY = (Math.random() * 2 - 1) * 10;
+          wander.start = t;
+          wander.dur = 1.6 + Math.random() * 2.2;
+          wander.next = t + wander.dur;
+        }
+        const k = clamp((t - wander.start) / (wander.dur || 1), 0, 1);
+        const e = k * k * (3 - 2 * k); // smoothstep between drift points
+        tx = wander.fromX + (wander.toX - wander.fromX) * e + Math.sin(t * 3.1) * 1.2;
+        ty = wander.fromY + (wander.toY - wander.fromY) * e + Math.cos(t * 2.7) * 1;
+        // The occasional gust — a small kick the spring soaks up as a sway.
+        if (Math.random() < 0.006) {
+          vel.x += (Math.random() * 2 - 1) * 1.7;
+          vel.y += (Math.random() * 2 - 1) * 1.3;
+        }
       }
 
       // Spring toward the target with damping → lag and a little overshoot.
@@ -461,6 +482,9 @@ function Tour({
 }) {
   const plan = entry.plan;
   const total = plan.steps.length;
+  // A "clean bill of health" tour: a summary + verdict but nothing to walk
+  // through. The step nav / spine / counter all collapse to just the verdict.
+  const noSteps = total === 0;
   const preferPost = useReviewPrefs((s) => s.defaultSuggestionAction === "post");
   const markSeen = useGuided((s) => s.markSeen);
   const setLastActive = useGuided((s) => s.setLastActive);
@@ -491,7 +515,20 @@ function Tour({
     },
     [cwd],
   );
-  const [active, setActive] = useState(() => Math.min(entry.lastActive, total - 1));
+  // Open a step's file — but only if it's actually part of this PR. A tour can
+  // occasionally name a path that isn't in the diff (a stale or mistaken
+  // reference); opening that would land on nothing, so warn instead.
+  const openStep = useCallback(
+    (path: string, line?: number) => {
+      if (!files.some((f) => f.filename === path)) {
+        toast.warning(`${path} isn't a file in this PR — it may be a stale or mistaken reference.`);
+        return;
+      }
+      onOpenFile(path, line);
+    },
+    [files, onOpenFile],
+  );
+  const [active, setActive] = useState(() => Math.max(0, Math.min(entry.lastActive, total - 1)));
   const [posted, setPosted] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<StepKind | null>(null);
   const [tourScrolled, setTourScrolled] = useState(false);
@@ -618,7 +655,7 @@ function Tour({
         move(-1);
       } else if (e.key === "o") {
         const step = plan.steps[active];
-        if (step) onOpenFile(step.path, step.line);
+        if (step) openStep(step.path, step.line);
       } else if (e.key === "x") {
         // 81: dismiss the active stop; the effect on `visible` re-snaps to the
         // next remaining stop automatically.
@@ -632,7 +669,7 @@ function Tour({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, plan.steps, onOpenFile, move, dismiss, prKey]);
+  }, [active, plan.steps, openStep, move, dismiss, prKey]);
 
   // The active (colored) step is exactly the one whose sticky header is pinned
   // at the top: the last visible section that has scrolled to/above the top
@@ -735,15 +772,24 @@ function Tour({
               <span>Guided tour</span>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1">
-              <span className="mr-1 text-xs tabular-nums text-muted-foreground">
-                {Math.max(1, pos + 1)} / {visible.length}
-              </span>
-              <Button size="icon-sm" variant="ghost" disabled={atFirst} onClick={() => move(-1)}>
-                <ChevronLeft className="size-4" />
-              </Button>
-              <Button size="icon-sm" variant="ghost" disabled={atLast} onClick={() => move(1)}>
-                <ChevronRight className="size-4" />
-              </Button>
+              {!noSteps && (
+                <>
+                  <span className="mr-1 text-xs tabular-nums text-muted-foreground">
+                    {Math.max(1, pos + 1)} / {visible.length}
+                  </span>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={atFirst}
+                    onClick={() => move(-1)}
+                  >
+                    <ChevronLeft className="size-4" />
+                  </Button>
+                  <Button size="icon-sm" variant="ghost" disabled={atLast} onClick={() => move(1)}>
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </>
+              )}
               <IconButton
                 label="Regenerate tour"
                 icon={RefreshCw}
@@ -780,31 +826,40 @@ function Tour({
           </Button>
         </div>
       ) : (
-        <div className="flex items-center gap-2 px-5 pt-2">
-          <p className="min-w-0 truncate text-xs text-muted-foreground/70">
-            Toured by {entry.provider === "codex" ? "Codex" : "Claude"} ·{" "}
-            {relativeTime(new Date(entry.generatedAt).toISOString())}
-          </p>
-          {(verdict || suggestionIdxs.length > 0) && (
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              {verdict && (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                    verdict.chip,
-                  )}
-                >
-                  <verdict.icon className="size-3" />
-                  {verdict.label}
-                </span>
-              )}
-              {suggestionIdxs.length > 0 && (
-                <Button size="xs" onClick={draftAsReview}>
-                  <Sparkles className="size-3" />
-                  Draft as review
-                </Button>
-              )}
-            </div>
+        <div className="px-5 pt-2">
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 truncate text-xs text-muted-foreground/70">
+              Toured by {entry.provider === "codex" ? "Codex" : "Claude"} ·{" "}
+              {relativeTime(new Date(entry.generatedAt).toISOString())}
+            </p>
+            {(verdict || suggestionIdxs.length > 0) && (
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {verdict && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+                      verdict.chip,
+                    )}
+                  >
+                    <verdict.icon className="size-3" />
+                    {verdict.label}
+                  </span>
+                )}
+                {suggestionIdxs.length > 0 && (
+                  <Button size="xs" onClick={draftAsReview}>
+                    <Sparkles className="size-3" />
+                    Draft as review
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+          {/* The verdict's one-line rationale — always shown when present, so the
+              reviewer sees WHY it's approve / request-changes, not just the chip. */}
+          {verdict && plan.verdictReason && (
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+              {plan.verdictReason}
+            </p>
           )}
         </div>
       )}
@@ -814,7 +869,7 @@ function Tour({
         <div className="flex flex-wrap items-center gap-1.5 px-5 pt-2.5">
           <span className="text-[11px] text-muted-foreground/60">Focus</span>
           {kindsPresent.map((k) => {
-            const K = KIND[k];
+            const K = KIND[k] ?? KIND.orient;
             const on = filter === k;
             return (
               <button
@@ -851,96 +906,101 @@ function Tour({
           the accent up to the active one, which glows — so there's no separate
           progress bar. */}
       <div className="mt-2 flex min-h-0 flex-1">
-        <aside className="hidden w-60 shrink-0 overflow-y-auto border-r border-hairline px-3 py-4 lg:block">
-          <p className="mb-2 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">
-            The tour
-          </p>
-          <div className="flex flex-col">
-            {visible.map((i, p) => {
-              const step = plan.steps[i];
-              const K = KIND[step.kind];
-              const done = p < pos;
-              const isActive = p === pos;
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => jumpTo(i)}
-                  className={cn(
-                    "group flex w-full gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-foreground/[0.04]",
-                    isActive && "bg-foreground/[0.05]",
-                  )}
-                >
-                  <span className="relative flex w-4 shrink-0 flex-col items-center self-stretch">
-                    <span
-                      className={cn(
-                        "w-px flex-1",
-                        p === 0
-                          ? "bg-transparent"
-                          : p <= pos
-                            ? "bg-foreground/35"
-                            : "bg-foreground/12",
-                      )}
-                    />
-                    <span className="relative flex size-3.5 items-center justify-center">
-                      {isActive && (
-                        <span
-                          aria-hidden
-                          className="absolute inline-flex size-full rounded-full bg-foreground opacity-20 motion-safe:animate-ping"
-                        />
-                      )}
-                      {/* Fill encodes STATE (done/current = accent, ahead = hollow).
-                          The kind shows in the row heading, not on the node. */}
+        {!noSteps && (
+          <aside className="hidden w-60 shrink-0 overflow-y-auto border-r border-hairline px-3 py-4 lg:block">
+            <p className="mb-2 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">
+              The tour
+            </p>
+            <div className="flex flex-col">
+              {visible.map((i, p) => {
+                const step = plan.steps[i];
+                const K = KIND[step.kind] ?? KIND.orient;
+                const done = p < pos;
+                const isActive = p === pos;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => jumpTo(i)}
+                    className={cn(
+                      "group flex w-full gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-foreground/[0.04]",
+                      isActive && "bg-foreground/[0.05]",
+                    )}
+                  >
+                    <span className="relative flex w-4 shrink-0 flex-col items-center self-stretch">
                       <span
                         className={cn(
-                          "relative flex size-3.5 items-center justify-center rounded-full",
-                          done && "bg-foreground/55 text-background",
-                          isActive && "bg-foreground/75 text-background ring-4 ring-foreground/10",
-                          !done && !isActive && "border-[1.5px] border-foreground/25 bg-background",
+                          "w-px flex-1",
+                          p === 0
+                            ? "bg-transparent"
+                            : p <= pos
+                              ? "bg-foreground/35"
+                              : "bg-foreground/12",
+                        )}
+                      />
+                      <span className="relative flex size-3.5 items-center justify-center">
+                        {isActive && (
+                          <span
+                            aria-hidden
+                            className="absolute inline-flex size-full rounded-full bg-foreground opacity-20 motion-safe:animate-ping"
+                          />
+                        )}
+                        {/* Fill encodes STATE (done/current = accent, ahead = hollow).
+                          The kind shows in the row heading, not on the node. */}
+                        <span
+                          className={cn(
+                            "relative flex size-3.5 items-center justify-center rounded-full",
+                            done && "bg-foreground/55 text-background",
+                            isActive &&
+                              "bg-foreground/75 text-background ring-4 ring-foreground/10",
+                            !done &&
+                              !isActive &&
+                              "border-[1.5px] border-foreground/25 bg-background",
+                          )}
+                        >
+                          {done && <Check className="size-2.5" strokeWidth={3} />}
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          "w-px flex-1",
+                          p === lastPos
+                            ? "bg-transparent"
+                            : p < pos
+                              ? "bg-foreground/35"
+                              : "bg-foreground/12",
+                        )}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1 py-2.5">
+                      <span
+                        className={cn(
+                          "mb-1 block text-[10px] font-medium uppercase leading-none tracking-wide",
+                          K.text,
+                          !isActive && "opacity-55",
                         )}
                       >
-                        {done && <Check className="size-2.5" strokeWidth={3} />}
+                        {K.label}
+                      </span>
+                      <span
+                        className={cn(
+                          "block truncate text-xs leading-snug",
+                          isActive
+                            ? "font-medium text-foreground"
+                            : done
+                              ? "text-muted-foreground"
+                              : "text-muted-foreground/55",
+                        )}
+                      >
+                        {step.title}
                       </span>
                     </span>
-                    <span
-                      className={cn(
-                        "w-px flex-1",
-                        p === lastPos
-                          ? "bg-transparent"
-                          : p < pos
-                            ? "bg-foreground/35"
-                            : "bg-foreground/12",
-                      )}
-                    />
-                  </span>
-                  <span className="min-w-0 flex-1 py-2.5">
-                    <span
-                      className={cn(
-                        "mb-1 block text-[10px] font-medium uppercase leading-none tracking-wide",
-                        K.text,
-                        !isActive && "opacity-55",
-                      )}
-                    >
-                      {K.label}
-                    </span>
-                    <span
-                      className={cn(
-                        "block truncate text-xs leading-snug",
-                        isActive
-                          ? "font-medium text-foreground"
-                          : done
-                            ? "text-muted-foreground"
-                            : "text-muted-foreground/55",
-                      )}
-                    >
-                      {step.title}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+        )}
 
         {/* No top padding here: container padding insets the sticky-stop, leaving
             a gap above the pinned header. The spacer below scrolls away cleanly. */}
@@ -976,17 +1036,19 @@ function Tour({
                 }
                 onCheckAI={cwd ? checkWithAI : undefined}
                 onDismiss={() => dismiss(prKey, i)}
-                onOpenFile={onOpenFile}
+                onOpenFile={openStep}
               />
             ) : null,
           )}
 
           <div className="flex flex-col items-center gap-1.5 py-6">
             {atLast ? (
-              <p className="text-xs text-muted-foreground">
-                {filter
-                  ? `That's every ${KIND[filter].label.toLowerCase()} stop.`
-                  : "That's the whole tour — happy reviewing."}
+              <p className="text-center text-xs text-muted-foreground">
+                {noSteps
+                  ? "No stops to walk through — nothing needed a closer look. The recommendation is above."
+                  : filter
+                    ? `That's every ${KIND[filter].label.toLowerCase()} stop.`
+                    : "That's the whole tour — happy reviewing."}
               </p>
             ) : (
               <Button size="xs" variant="ghost" onClick={() => move(1)}>
@@ -1077,7 +1139,7 @@ const Step = ({
   onDismiss?: () => void;
   onOpenFile: (path: string, line?: number) => void;
 }) => {
-  const kind = KIND[step.kind];
+  const kind = KIND[step.kind] ?? KIND.orient;
   const Icon = kind.icon;
   const [posting, setPosting] = useState(false);
   const [postedGh, setPostedGh] = useState(false);
@@ -1278,10 +1340,13 @@ function InlineDiff({
   const window = useMemo(() => {
     const hunks = parsePatch(file?.patch ?? null);
     const inRange = (nl: number | null | undefined) => nl != null && nl >= lo && nl <= hi;
+    // The hunk that actually contains the anchor line, else the first hunk that
+    // reaches past it. NO blind `hunks[0]` fallback — for a hallucinated/out-of-
+    // range line we'd rather show the honest "not in this diff" note than a
+    // confidently-wrong slice of unrelated code.
     const hunk =
       hunks.find((h) => h.lines.some((l) => inRange(l.newLine))) ??
-      hunks.find((h) => h.lines.some((l) => (l.newLine ?? 0) >= lo)) ??
-      hunks[0];
+      hunks.find((h) => h.lines.some((l) => (l.newLine ?? 0) >= lo));
     if (!hunk) return null;
     const rows = hunk.lines.filter((l) => l.kind !== "hunk");
     let first = rows.findIndex((l) => inRange(l.newLine));
@@ -1306,7 +1371,9 @@ function InlineDiff({
   if (!window) {
     return (
       <p className="rounded-lg bg-foreground/[0.03] p-2.5 text-xs text-muted-foreground">
-        Not part of this diff — open the file for the full context.
+        {file
+          ? `Line ${line} isn't in this file's diff — open the file for the full context.`
+          : "This path isn't part of the PR's diff (the AI may have referenced code outside it)."}
       </p>
     );
   }

@@ -33,14 +33,31 @@ export function useGuidedEvents() {
         if (canceled) return;
         // `key` is `owner/repo#number` — show a friendly short ref in the toast.
         const ref = key.split("/").pop() ?? key;
+        // Surface the model's own first line so an opaque failure (a refusal,
+        // "diff too large", a rate-limit, a bad model id) is actionable instead
+        // of a generic "didn't return a usable tour".
+        const hint = (raw: string): string => {
+          const first =
+            raw
+              .trim()
+              .split("\n")
+              .find((l) => l.trim()) ?? "";
+          return first.length > 160 ? `${first.slice(0, 157)}…` : first;
+        };
         if (!ok) {
-          gen.fail(key, error ?? "The AI review failed.");
+          gen.fail(key, hint(error ?? "") || "The AI review failed.");
           toast.error(`Guided tour failed · ${ref}`);
           return;
         }
         const plan = parseGuided(output ?? "");
         if (!plan) {
-          gen.fail(key, "The AI didn't return a usable tour. Try again.");
+          const h = hint(output ?? "");
+          gen.fail(
+            key,
+            h
+              ? `The AI didn't return a usable tour — it said: “${h}”`
+              : "The AI didn't return a usable tour. Try again.",
+          );
           toast.error(`Guided tour failed · ${ref}`);
           return;
         }

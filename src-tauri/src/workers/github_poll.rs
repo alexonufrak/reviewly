@@ -30,6 +30,25 @@ fn repo_full_name(p: &github::PullSummary) -> Option<String> {
     Some(format!("{owner}/{name}"))
 }
 
+/// `owner/repo#number` from a notification's PR subject url
+/// (`…/repos/owner/repo/pulls/123`). Matches `pr_key` so a notification thread
+/// can be cross-referenced against the live review-requested set.
+fn notif_pr_key(n: &github::Notification) -> Option<String> {
+    let url = n.subject.url.as_deref()?;
+    let mut it = url.rsplit('/');
+    let num = it.next()?; // 123
+    let _kind = it.next()?; // pulls | issues
+    let repo = it.next()?;
+    let owner = it.next()?;
+    num.parse::<u64>().ok()?; // sanity: it really is a PR/issue url
+    Some(format!("{owner}/{repo}#{num}"))
+}
+
+/// `owner/repo#number` for a PR summary, in the same shape as `notif_pr_key`.
+fn pr_key(p: &github::PullSummary) -> Option<String> {
+    Some(format!("{}#{}", repo_full_name(p)?, p.number))
+}
+
 /// Poll GitHub for PRs that need the user's attention — incrementally. Each
 /// cycle does a cheap count (ETag-revalidated) plus a *delta* search for only
 /// PRs updated since the last cycle, instead of re-listing everything. Emits:
@@ -122,9 +141,39 @@ pub async fn run(app: AppHandle) {
                         .lock()
                         .map(|r| r.clone())
                         .unwrap_or_default();
+                    // GitHub freezes a thread's `reason` at creation, so a
+                    // `review_requested` thread keeps firing for later comments /
+                    // CI even after you've already reviewed. Fetch the live
+                    // review-requested set (the same truth that drives the tray)
+                    // so we can drop those stale alerts — but only when such a
+                    // thread is actually in play, to avoid an extra search.
+                    let pending: Option<HashSet<String>> = if notes
+                        .iter()
+                        .any(|n| n.unread && n.reason == "review_requested" && reasons.contains(&n.reason))
+                    {
+                        github::search_prs(&state, &token, BASE)
+                            .await
+                            .ok()
+                            .map(|prs| prs.iter().filter_map(pr_key).collect())
+                    } else {
+                        None
+                    };
                     for n in &notes {
                         if !n.unread || !reasons.contains(&n.reason) {
                             continue;
+                        }
+                        // Sticky-reason guard: only alert "Review requested"
+                        // while the PR is genuinely still awaiting your review.
+                        // A thread whose PR has dropped out of the set is stale
+                        // post-review activity — skip WITHOUT marking it seen, so
+                        // a real re-request can still alert later. Fail open if
+                        // the pending lookup was unavailable.
+                        if n.reason == "review_requested" {
+                            if let (Some(pend), Some(key)) = (&pending, notif_pr_key(n)) {
+                                if !pend.contains(&key) {
+                                    continue;
+                                }
+                            }
                         }
                         // First time we see a thread id is "new"; the priming
                         // pass only seeds the set (no alert for the backlog).

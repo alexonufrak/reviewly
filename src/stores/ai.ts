@@ -15,6 +15,27 @@ export const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai: "your model",
 };
 
+/**
+ * Common models per CLI provider — just suggestions for the free-text model
+ * field (it accepts any id the CLI understands, so new models work without a
+ * code change). Fable is a Claude model; each CLI takes its own set.
+ */
+export const MODEL_SUGGESTIONS: Record<AiProvider, string[]> = {
+  claude: [
+    "default",
+    "sonnet",
+    "opus",
+    "haiku",
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001",
+    "claude-fable-5",
+  ],
+  codex: ["gpt-5-codex", "gpt-5", "o3", "o4-mini", "gpt-4.1"],
+  gemini: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp"],
+  openai: [],
+};
+
 interface State {
   /** Which backend to use for reviews. */
   provider: AiProvider;
@@ -28,6 +49,9 @@ interface State {
   /** Optional bearer key; local servers like Ollama need none. */
   apiKey: string;
   setOpenai: (cfg: Partial<Pick<State, "baseUrl" | "model" | "apiKey">>) => void;
+  /** Optional model override per CLI provider (claude/codex/gemini). Empty = the CLI's own default. */
+  cliModels: Partial<Record<AiProvider, string>>;
+  setCliModel: (provider: AiProvider, model: string) => void;
 }
 
 export const useAiProvider = create<State>()(
@@ -39,6 +63,9 @@ export const useAiProvider = create<State>()(
       model: "",
       apiKey: "",
       setOpenai: (cfg) => set(cfg),
+      cliModels: {},
+      setCliModel: (provider, model) =>
+        set((s) => ({ cliModels: { ...s.cliModels, [provider]: model } })),
     }),
     { name: "reviewly.ai", storage: sqlStorage<State>() },
   ),
@@ -56,6 +83,9 @@ export function aiInvokeArgs(): {
   apiKey?: string;
 } {
   const s = useAiProvider.getState();
-  if (s.provider !== "openai") return { provider: s.provider };
+  if (s.provider !== "openai") {
+    const model = s.cliModels[s.provider]?.trim();
+    return model ? { provider: s.provider, model } : { provider: s.provider };
+  }
   return { provider: s.provider, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey };
 }
