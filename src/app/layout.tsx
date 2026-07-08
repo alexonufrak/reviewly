@@ -17,6 +17,7 @@ import { useUpdater } from "@/app/use-updater";
 import { AboutDialog } from "@/components/about-dialog";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { ShortcutsCheatsheet } from "@/components/shortcuts-cheatsheet";
+import { WhatsNewDialog } from "@/components/whats-new-dialog";
 import { invoke } from "@/lib/tauri";
 import { ACCENTS, useAppearance } from "@/stores/appearance";
 import { resolveTheme, useTheme } from "@/stores/theme";
@@ -101,6 +102,31 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <SettingsDialog />
       <ShortcutsCheatsheet />
       <AboutDialog />
+      <WhatsNewDialog />
+      <Toaster
+        theme={theme}
+        position="bottom-right"
+        closeButton
+        toastOptions={{
+          className: "!bg-popover/80 !backdrop-blur-xl !text-foreground !rounded-xl !shadow-2xl",
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Bare layout for the detached AI-chat window: applies the theme + accent and
+ * renders toasts, but deliberately omits the sidebar, title bar, command
+ * palette, and every app-wide sync hook (poller, notifications, tray nav, …) —
+ * those belong to the single main window, not a satellite chat window.
+ */
+export function ChatWindowLayout({ children }: { children: ReactNode }) {
+  const theme = useAppliedTheme();
+  useAppliedAppearance();
+  return (
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      {children}
       <Toaster
         theme={theme}
         position="bottom-right"

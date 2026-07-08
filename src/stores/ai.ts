@@ -52,6 +52,10 @@ interface State {
   /** Optional model override per CLI provider (claude/codex/gemini). Empty = the CLI's own default. */
   cliModels: Partial<Record<AiProvider, string>>;
   setCliModel: (provider: AiProvider, model: string) => void;
+  /** How long an AI run may take before it's stopped, in seconds. `null` =
+   * automatic (the backend picks 3 min, or 7 min when the PR's clone is present). */
+  aiTimeoutSecs: number | null;
+  setAiTimeoutSecs: (secs: number | null) => void;
 }
 
 export const useAiProvider = create<State>()(
@@ -66,6 +70,8 @@ export const useAiProvider = create<State>()(
       cliModels: {},
       setCliModel: (provider, model) =>
         set((s) => ({ cliModels: { ...s.cliModels, [provider]: model } })),
+      aiTimeoutSecs: null,
+      setAiTimeoutSecs: (aiTimeoutSecs) => set({ aiTimeoutSecs }),
     }),
     { name: "reviewly.ai", storage: sqlStorage<State>() },
   ),
@@ -81,11 +87,14 @@ export function aiInvokeArgs(): {
   baseUrl?: string;
   model?: string;
   apiKey?: string;
+  timeoutSecs?: number;
 } {
   const s = useAiProvider.getState();
+  // `null`/0 → omit so the Rust side keeps its automatic default.
+  const timeout = s.aiTimeoutSecs && s.aiTimeoutSecs > 0 ? { timeoutSecs: s.aiTimeoutSecs } : {};
   if (s.provider !== "openai") {
     const model = s.cliModels[s.provider]?.trim();
-    return model ? { provider: s.provider, model } : { provider: s.provider };
+    return { provider: s.provider, ...(model ? { model } : {}), ...timeout };
   }
-  return { provider: s.provider, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey };
+  return { provider: s.provider, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey, ...timeout };
 }

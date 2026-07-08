@@ -96,6 +96,7 @@ import {
   RotateCw,
   Rows3,
   Sparkles,
+  SquareArrowOutUpRight,
   X,
 } from "lucide-react";
 import {
@@ -679,6 +680,35 @@ export function PRDetailPage() {
       }
     }
     toast.success("Posted to GitHub");
+  }
+
+  // Pop the chat out into its own resizable Tauri window. MVP model: the
+  // detached window owns the conversation (same persisted store key), so we
+  // collapse the inline panel; re-opening focuses the existing window.
+  async function detachChat() {
+    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const label = `chat-${owner}-${repo}-${number}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const existing = await WebviewWindow.getByLabel(label);
+    if (existing) {
+      await existing.setFocus();
+      setChatOpen(false);
+      return;
+    }
+    const win = new WebviewWindow(label, {
+      url: `/chat/${owner}/${repo}/${number}`,
+      title: `Chat · ${owner}/${repo} #${number}`,
+      width: 440,
+      height: 680,
+      minWidth: 340,
+      minHeight: 420,
+      resizable: true,
+    });
+    win.once("tauri://error", (e) => {
+      toast.error(
+        `Couldn't open the chat window — ${String((e as { payload?: unknown }).payload)}`,
+      );
+    });
+    setChatOpen(false);
   }
 
   // Fetch the currently-viewed file's HEAD content so the diff viewer can
@@ -1425,17 +1455,28 @@ export function PRDetailPage() {
             <div className="flex items-center gap-1.5 border-b border-hairline px-3 py-2.5 text-[13px] font-medium text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" />
               Ask about this PR
-              <button
-                type="button"
-                onClick={() => {
-                  setChatOpen(false);
-                  chatToggleRef.current?.focus();
-                }}
-                aria-label="Close chat"
-                className="ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-              >
-                <X className="size-3.5" />
-              </button>
+              <div className="ml-auto flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={detachChat}
+                  aria-label="Open chat in a separate window"
+                  title="Open in a separate window"
+                  className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                >
+                  <SquareArrowOutUpRight className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChatOpen(false);
+                    chatToggleRef.current?.focus();
+                  }}
+                  aria-label="Close chat"
+                  className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
             </div>
             <div className="min-h-0 flex-1 px-3 py-3">
               <AiReview

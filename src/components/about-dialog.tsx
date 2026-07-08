@@ -5,7 +5,7 @@ import { safeOpenUrl } from "@/lib/ui";
 import { useUi } from "@/stores/ui";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { Github, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Github, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 /**
@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 export function AboutDialog() {
   const open = useUi((s) => s.aboutOpen);
   const setOpen = useUi((s) => s.setAboutOpen);
+  const setWhatsNewOpen = useUi((s) => s.setWhatsNewOpen);
   const [version, setVersion] = useState("");
 
   // The native app-menu "About Reviewly" routes here via this event.
@@ -95,6 +96,18 @@ export function AboutDialog() {
           >
             <RefreshCw className="size-3.5" />
             Check for updates
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setOpen(false);
+              setWhatsNewOpen(true);
+            }}
+          >
+            <Sparkles className="size-3.5" />
+            What's new
           </Button>
           <Button
             variant="ghost"

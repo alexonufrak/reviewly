@@ -27,6 +27,16 @@ fn run_timeout(cwd: Option<&str>) -> Duration {
     }
 }
 
+/// The effective timeout: the user's explicit Settings override (seconds) when
+/// set and positive, else the provided smart default. With no override the auto
+/// behavior stays byte-identical.
+fn resolve_timeout(override_secs: Option<u64>, default: Duration) -> Duration {
+    match override_secs {
+        Some(s) if s > 0 => Duration::from_secs(s),
+        _ => default,
+    }
+}
+
 /// CLI binary for a provider id. Unknown ids fall back to Claude.
 fn provider_bin(provider: &str) -> &str {
     match provider {
@@ -44,12 +54,13 @@ async fn run_provider(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<String> {
     match provider {
-        "codex" => run_codex(prompt, cwd, model.as_deref()).await,
-        "gemini" => run_gemini(prompt, cwd, model.as_deref()).await,
-        "openai" => run_openai_compatible(prompt, base_url, model, api_key).await,
-        _ => run_claude(prompt, cwd, model.as_deref()).await,
+        "codex" => run_codex(prompt, cwd, model.as_deref(), timeout_secs).await,
+        "gemini" => run_gemini(prompt, cwd, model.as_deref(), timeout_secs).await,
+        "openai" => run_openai_compatible(prompt, base_url, model, api_key, timeout_secs).await,
+        _ => run_claude(prompt, cwd, model.as_deref(), timeout_secs).await,
     }
 }
 
@@ -214,8 +225,9 @@ pub async fn ai_review(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<String> {
-    run_provider(&provider, &prompt, cwd.as_deref(), base_url, model, api_key).await
+    run_provider(&provider, &prompt, cwd.as_deref(), base_url, model, api_key, timeout_secs).await
 }
 
 /// Run a review in the BACKGROUND, keyed by `key` (the PR). Returns immediately;
@@ -236,6 +248,7 @@ pub async fn ai_review_bg(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<()> {
     {
         let mut set = state.ai_inflight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -250,7 +263,8 @@ pub async fn ai_review_bg(
     let task_key = key.clone();
     let handle = tauri::async_runtime::spawn(async move {
         let result =
-            run_provider(&provider, &prompt, cwd.as_deref(), base_url, model, api_key).await;
+            run_provider(&provider, &prompt, cwd.as_deref(), base_url, model, api_key, timeout_secs)
+                .await;
         if let Ok(mut set) = inflight.lock() {
             set.remove(&task_key);
         }
@@ -324,7 +338,12 @@ fn feed_stdin(child: &mut tokio::process::Child, prompt: &str) {
     }
 }
 
-async fn run_claude(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppResult<String> {
+async fn run_claude(
+    prompt: &str,
+    cwd: Option<&str>,
+    model: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> AppResult<String> {
     let mut cmd = cli_command("claude");
     // Prompt goes over stdin, not argv: a large PR context could otherwise hit
     // the OS arg-length limit, while stdin has no such ceiling. `claude -p`
@@ -350,7 +369,7 @@ async fn run_claude(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> App
         .map_err(|e| AppError::Other(format!("failed to spawn claude: {e}")))?;
     feed_stdin(&mut child, prompt);
 
-    let timeout = run_timeout(cwd);
+    let timeout = resolve_timeout(timeout_secs, run_timeout(cwd));
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(res) => res.map_err(|e| AppError::Other(format!("wait claude: {e}")))?,
         // On timeout the dropped future kills the child (kill_on_drop).
@@ -421,7 +440,12 @@ pub async fn apply_with_claude(prompt: &str, cwd: &str) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-async fn run_codex(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppResult<String> {
+async fn run_codex(
+    prompt: &str,
+    cwd: Option<&str>,
+    model: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> AppResult<String> {
     // Write only the agent's final message to a temp file so we get clean
     // markdown back instead of the interleaved progress log on stdout.
     let nanos = std::time::SystemTime::now()
@@ -453,7 +477,7 @@ async fn run_codex(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppR
 
     feed_stdin(&mut child, prompt);
 
-    let timeout = run_timeout(cwd);
+    let timeout = resolve_timeout(timeout_secs, run_timeout(cwd));
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(res) => res.map_err(|e| AppError::Other(format!("wait codex: {e}")))?,
         Err(_) => {
@@ -491,7 +515,12 @@ async fn run_codex(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppR
 
 /// Gemini CLI in non-interactive mode (`gemini -p`). Drop-in like Claude/Codex;
 /// runs inside the PR clone when present so it can read the repo.
-async fn run_gemini(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> AppResult<String> {
+async fn run_gemini(
+    prompt: &str,
+    cwd: Option<&str>,
+    model: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> AppResult<String> {
     let mut cmd = cli_command("gemini");
     cmd.arg("-p")
         .arg(prompt)
@@ -504,7 +533,7 @@ async fn run_gemini(prompt: &str, cwd: Option<&str>, model: Option<&str>) -> App
     let child = cmd
         .spawn()
         .map_err(|e| AppError::Other(format!("failed to spawn gemini: {e}")))?;
-    let timeout = run_timeout(cwd);
+    let timeout = resolve_timeout(timeout_secs, run_timeout(cwd));
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(res) => res.map_err(|e| AppError::Other(format!("wait gemini: {e}")))?,
         Err(_) => {
@@ -540,6 +569,7 @@ async fn run_openai_compatible(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<String> {
     let base = base_url.unwrap_or_default();
     let base = base.trim().trim_end_matches('/');
@@ -564,7 +594,7 @@ async fn run_openai_compatible(
         "temperature": 0.2,
     });
     let client = reqwest::Client::builder()
-        .timeout(AI_TIMEOUT)
+        .timeout(resolve_timeout(timeout_secs, AI_TIMEOUT))
         .build()
         .map_err(|e| AppError::Other(format!("http client: {e}")))?;
     let mut req = client.post(&url).json(&body);
@@ -624,6 +654,7 @@ pub async fn ai_stream(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<()> {
     {
         let mut set = state.ai_inflight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -645,6 +676,7 @@ pub async fn ai_stream(
             base_url,
             model,
             api_key,
+            timeout_secs,
         )
         .await;
         if let Ok(mut s) = inflight.lock() {
@@ -681,12 +713,13 @@ async fn stream_provider(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<(String, Option<f64>)> {
     match provider {
-        "claude" => stream_claude(app, key, prompt, cwd, model.as_deref()).await,
-        "openai" => stream_openai(app, key, prompt, base_url, model, api_key).await,
+        "claude" => stream_claude(app, key, prompt, cwd, model.as_deref(), timeout_secs).await,
+        "openai" => stream_openai(app, key, prompt, base_url, model, api_key, timeout_secs).await,
         other => {
-            let text = run_provider(other, prompt, cwd, base_url, model, api_key).await?;
+            let text = run_provider(other, prompt, cwd, base_url, model, api_key, timeout_secs).await?;
             let _ = app.emit("ai:chunk", serde_json::json!({ "key": key, "delta": text }));
             Ok((text, None))
         }
@@ -699,6 +732,7 @@ async fn stream_claude(
     prompt: &str,
     cwd: Option<&str>,
     model: Option<&str>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<(String, Option<f64>)> {
     let mut cmd = cli_command("claude");
     // Prompt over stdin (not argv) so a large PR context can't hit the OS
@@ -771,12 +805,13 @@ async fn stream_claude(
         Ok::<(), AppError>(())
     };
 
-    match tokio::time::timeout(AI_TIMEOUT, read).await {
+    let cap = resolve_timeout(timeout_secs, AI_TIMEOUT);
+    match tokio::time::timeout(cap, read).await {
         Ok(r) => r?,
         Err(_) => {
             return Err(AppError::Other(format!(
                 "Claude took longer than {}s and was stopped. Try again, or pick a smaller PR.",
-                AI_TIMEOUT.as_secs()
+                cap.as_secs()
             )))
         }
     }
@@ -794,6 +829,7 @@ async fn stream_openai(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    timeout_secs: Option<u64>,
 ) -> AppResult<(String, Option<f64>)> {
     let base = base_url.unwrap_or_default();
     let base = base.trim().trim_end_matches('/');
@@ -817,7 +853,7 @@ async fn stream_openai(
         "temperature": 0.2,
     });
     let client = reqwest::Client::builder()
-        .timeout(AI_TIMEOUT)
+        .timeout(resolve_timeout(timeout_secs, AI_TIMEOUT))
         .build()
         .map_err(|e| AppError::Other(format!("http client: {e}")))?;
     let mut req = client.post(&url).json(&body);

@@ -15,6 +15,10 @@ interface UiState {
   aboutOpen: boolean;
   setAboutOpen: (open: boolean) => void;
 
+  /** Manual "What's new" open (the panel also auto-opens once after an update). */
+  whatsNewOpen: boolean;
+  setWhatsNewOpen: (open: boolean) => void;
+
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 
@@ -55,6 +59,9 @@ export const useUi = create<UiState>()(
 
       aboutOpen: false,
       setAboutOpen: (aboutOpen) => set({ aboutOpen }),
+
+      whatsNewOpen: false,
+      setWhatsNewOpen: (whatsNewOpen) => set({ whatsNewOpen }),
 
       sidebarCollapsed: false,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

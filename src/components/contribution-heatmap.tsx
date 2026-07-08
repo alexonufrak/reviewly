@@ -69,46 +69,47 @@ export function ContributionHeatmap({
     <div className="min-w-0">
       <div className="mb-2 flex items-end justify-between">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        {peak && (
+        {peak && peak.count > 0 && (
           <span className="text-xs text-muted-foreground">
-            Peak <span className="text-foreground">{formatDay(peak.date)}</span>
+            Peak <span className="text-foreground">{peak.count}</span> · {formatDay(peak.date)}
           </span>
         )}
       </div>
 
-      <div className="overflow-x-auto pb-1">
-        <div className="inline-flex flex-col gap-1">
-          {/* month labels */}
-          <div className="flex gap-[3px] text-[10px] text-muted-foreground/80">
-            {weeks.map((week, i) => {
-              const m = week[0].month;
-              const show = m !== (i > 0 ? weeks[i - 1][0].month : -1);
-              return (
-                <div key={week[0].key} className="relative h-3.5 w-2.5">
-                  {show && (
-                    <span className="absolute left-0 top-0 whitespace-nowrap">{MONTHS[m]}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {/* grid */}
-          <div className="flex gap-[3px]">
-            {weeks.map((week) => (
-              <div key={week[0].key} className="flex flex-col gap-[3px]">
-                {week.map((day) => (
-                  <div
-                    key={day.key}
-                    title={day.future ? undefined : `${day.key} · ${day.count} merged`}
-                    className={cn(
-                      "size-2.5 rounded-[2px] ring-1 ring-inset ring-foreground/[0.04]",
-                      day.future ? "opacity-0" : FILL[level(day.count, max)],
-                    )}
-                  />
-                ))}
+      {/* Full-width, responsive: week columns flex to fill the container and the
+          day cells stay square (aspect-square) — so the whole year fits with no
+          horizontal scroll, at any card width. */}
+      <div className="flex flex-col gap-1">
+        {/* month labels */}
+        <div className="flex gap-[2px] text-[10px] text-muted-foreground/80">
+          {weeks.map((week, i) => {
+            const m = week[0].month;
+            const show = m !== (i > 0 ? weeks[i - 1][0].month : -1);
+            return (
+              <div key={week[0].key} className="relative h-3.5 flex-1">
+                {show && (
+                  <span className="absolute left-0 top-0 whitespace-nowrap">{MONTHS[m]}</span>
+                )}
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
+        {/* grid */}
+        <div className="flex gap-[2px]">
+          {weeks.map((week) => (
+            <div key={week[0].key} className="flex flex-1 flex-col gap-[2px]">
+              {week.map((day) => (
+                <div
+                  key={day.key}
+                  title={day.future ? undefined : `${day.key} · ${day.count} merged`}
+                  className={cn(
+                    "aspect-square w-full rounded-[2px] ring-1 ring-inset ring-foreground/[0.04]",
+                    day.future ? "opacity-0" : FILL[level(day.count, max)],
+                  )}
+                />
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 

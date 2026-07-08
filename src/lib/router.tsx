@@ -1,4 +1,4 @@
-import { AppLayout } from "@/app/layout";
+import { AppLayout, ChatWindowLayout } from "@/app/layout";
 import { CrashFallback } from "@/components/error-boundary";
 import { DashboardPage } from "@/routes/dashboard";
 import {
@@ -8,13 +8,28 @@ import {
   createRouter,
   lazyRouteComponent,
 } from "@tanstack/react-router";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
+/** The detached AI-chat window (label `chat-*`) gets a bare layout; every other
+ *  window is the main app shell. Resolved once from the window label, which is
+ *  fixed for a window's lifetime. */
+function RootLayout() {
+  let bare = false;
+  try {
+    bare = getCurrentWindow().label.startsWith("chat-");
+  } catch {
+    bare = false;
+  }
+  const Layout = bare ? ChatWindowLayout : AppLayout;
+  return (
+    <Layout>
+      <Outlet />
+    </Layout>
+  );
+}
 
 const rootRoute = createRootRoute({
-  component: () => (
-    <AppLayout>
-      <Outlet />
-    </AppLayout>
-  ),
+  component: RootLayout,
   // A render crash inside any route shows the in-app "Something went wrong"
   // fallback (with a Reload) instead of leaving a blank window.
   errorComponent: ({ error, reset }) => <CrashFallback error={error} onReload={reset} />,
@@ -77,6 +92,13 @@ const settingsRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/settings"), "SettingsPage"),
 });
 
+// Loaded only in a detached chat window (see RootLayout / the pop-out button).
+const chatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/chat/$owner/$repo/$number",
+  component: lazyRouteComponent(() => import("@/routes/chat"), "ChatWindowPage"),
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   onboardingRoute,
@@ -87,6 +109,7 @@ const routeTree = rootRoute.addChildren([
   notificationsRoute,
   dependabotRoute,
   settingsRoute,
+  chatRoute,
 ]);
 
 export const router = createRouter({

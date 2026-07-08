@@ -86,8 +86,6 @@ export function SettingsPage() {
     enabled: !!viewer?.login,
     staleTime: 30 * 60_000,
   });
-  const bestDay = activity.data?.days.reduce((m, d) => Math.max(m, d.count), 0) ?? 0;
-
   async function signOut() {
     await invoke("auth_sign_out");
     setAuth({ signedIn: false, viewer: null, loading: false });
@@ -104,21 +102,37 @@ export function SettingsPage() {
           <CollapsibleSection id="github" title="GitHub account" icon={Github}>
             {viewer ? (
               <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">Activity over the last year</span>
+                {/* Identity + last-12-months summary on one row; the merged-PRs
+                    total lives here (as a chip), so no duplicate stat tiles. */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <UserHoverCard user={viewer}>
+                      <img
+                        src={viewer.avatar_url}
+                        alt={viewer.login}
+                        className="size-10 rounded-full"
+                      />
+                    </UserHoverCard>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {viewer.name ?? viewer.login}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">@{viewer.login}</p>
+                    </div>
+                  </div>
                   {activity.data && (
                     <div className="inline-flex items-center divide-x divide-hairline rounded-lg border border-hairline bg-foreground/[0.03] text-xs">
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-muted-foreground">
                         <GitCommitHorizontal className="size-3.5 text-success" />
                         Commits{" "}
-                        <span className="font-medium tabular-nums text-success">
+                        <span className="font-medium tabular-nums text-foreground">
                           {activity.data.commits}
                         </span>
                       </span>
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-muted-foreground">
                         <GitMerge className="size-3.5 text-success" />
                         Merged PRs{" "}
-                        <span className="font-medium tabular-nums text-success">
+                        <span className="font-medium tabular-nums text-foreground">
                           {activity.data.mergedPrs}
                         </span>
                       </span>
@@ -126,39 +140,15 @@ export function SettingsPage() {
                   )}
                 </div>
 
-                <div className="flex flex-col gap-5 md:flex-row">
-                  <div className="flex w-full shrink-0 flex-col gap-3 md:w-48">
-                    <div className="flex items-center gap-3">
-                      <UserHoverCard user={viewer}>
-                        <img
-                          src={viewer.avatar_url}
-                          alt={viewer.login}
-                          className="size-9 rounded-full"
-                        />
-                      </UserHoverCard>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-foreground">
-                          {viewer.name ?? viewer.login}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">@{viewer.login}</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Stat label="Total" value={activity.data?.mergedPrs ?? 0} />
-                      <Stat label="Best day" value={bestDay} />
-                    </div>
-                  </div>
+                {/* Full-width activity heatmap (no horizontal scroll). */}
+                {activity.isLoading ? (
+                  <div className="h-28 w-full animate-pulse rounded-lg bg-foreground/[0.04]" />
+                ) : activity.data ? (
+                  <ContributionHeatmap days={activity.data.days} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">Couldn't load activity.</p>
+                )}
 
-                  <div className="min-w-0 flex-1">
-                    {activity.isLoading ? (
-                      <div className="h-28 w-full animate-pulse rounded-lg bg-foreground/[0.04]" />
-                    ) : activity.data ? (
-                      <ContributionHeatmap days={activity.data.days} />
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Couldn't load activity.</p>
-                    )}
-                  </div>
-                </div>
                 <Button
                   variant="ghost"
                   size="xs"
@@ -207,6 +197,8 @@ export function SettingsPage() {
               </div>
 
               {provider === "openai" ? <OpenAiConfig /> : <CliModelConfig provider={provider} />}
+
+              <AiTimeoutConfig />
 
               <AiInstructions />
             </Card>
@@ -923,6 +915,50 @@ function OpenAiField({
   );
 }
 
+const TIMEOUT_OPTIONS: { value: string; label: string }[] = [
+  { value: "auto", label: "Automatic" },
+  { value: "180", label: "3 minutes" },
+  { value: "300", label: "5 minutes" },
+  { value: "420", label: "7 minutes" },
+  { value: "600", label: "10 minutes" },
+  { value: "900", label: "15 minutes" },
+  { value: "1200", label: "20 minutes" },
+];
+
+/** How long an AI review / chat may run before it's stopped. "Automatic" keeps
+ *  the backend's smart default (3 min, or 7 min when the PR's clone is present);
+ *  an explicit value applies to every provider and to both review and chat. */
+function AiTimeoutConfig() {
+  const secs = useAiProvider((s) => s.aiTimeoutSecs);
+  const setSecs = useAiProvider((s) => s.setAiTimeoutSecs);
+  const value = secs == null ? "auto" : String(secs);
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline pt-4">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-foreground">Timeout</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          How long a review or chat may run before it's stopped. Automatic uses 3 min, or 7 min when
+          the repo is cloned locally.
+        </p>
+      </div>
+      <Select value={value} onValueChange={(v) => v && setSecs(v === "auto" ? null : Number(v))}>
+        <SelectTrigger size="sm" className="w-36 text-xs text-foreground">
+          <SelectValue>
+            {(v) => TIMEOUT_OPTIONS.find((o) => o.value === v)?.label ?? String(v)}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {TIMEOUT_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value} className="text-xs">
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 /** Free-text model override (with suggestions) for a CLI provider — sent to the
  *  CLI as `--model`; blank keeps the CLI's own default. */
 function CliModelConfig({ provider }: { provider: AiProvider }) {
@@ -955,15 +991,6 @@ function CliModelConfig({ provider }: { provider: AiProvider }) {
         Any model id the {PROVIDER_LABEL[provider]} CLI accepts, passed as{" "}
         <code className="font-mono text-[10px]">--model</code>. Leave blank for its default.
       </p>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg bg-foreground/[0.04] px-3 py-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="font-mono text-lg tabular-nums text-foreground">{value}</p>
     </div>
   );
 }
