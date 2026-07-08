@@ -81,7 +81,7 @@ Sections are collapsible, refresh automatically, and show how long ago they sync
 
 The **Pull Requests** page (`⌘2`) is the full, filterable list:
 
-- **Filter** by state (open / draft / merged / closed), repository, labels (include → exclude → off), or "CI failing".
+- **Filter** by state (open / draft / merged / closed), repository, labels (include → exclude → off), or CI status.
 - **Group** by repository or author; **sort** by updated, created, or title.
 - **Search** with `/` — matches title, author, or PR number. Active filters show as removable chips.
 - **Virtualized** rendering handles thousands of PRs without lag.

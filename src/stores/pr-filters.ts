@@ -7,6 +7,7 @@ export type GroupBy = "none" | "repo" | "author";
 export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title";
 export type LabelState = "include" | "exclude";
 export type PrScope = "review-requested" | "created" | "involved";
+export type CiFilter = "failing" | "not-failing";
 
 export interface PrFilterSnapshot {
   scope: PrScope;
@@ -17,7 +18,8 @@ export interface PrFilterSnapshot {
   repos: string[];
   authors: string[];
   states: PrState[];
-  ciFailing: boolean;
+  ciStatus?: CiFilter | null;
+  ciFailing?: boolean;
 }
 
 export interface PrFilterGroup {
@@ -40,6 +42,7 @@ interface State {
   repos: string[];
   authors: string[];
   states: PrState[];
+  ciStatus: CiFilter | null;
   ciFailing: boolean;
   filterGroups: PrFilterGroup[];
   /** Last list scrollTop, keyed by list scope (watchedKey or scope) so each queue restores its own position. */
@@ -57,6 +60,7 @@ interface State {
   clearLabels: () => void;
   toggleState: (s: PrState) => void;
   clearStates: () => void;
+  setCiStatus: (status: CiFilter | null) => void;
   toggleCiFailing: () => void;
   saveFilterGroup: (name: string, filters: PrFilterSnapshot) => void;
   applyFilterGroup: (id: string) => void;
@@ -73,13 +77,18 @@ const makeId = () =>
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
-const cloneSnapshot = (filters: PrFilterSnapshot): PrFilterSnapshot => ({
-  ...filters,
-  labelStates: { ...filters.labelStates },
-  repos: [...filters.repos],
-  authors: [...filters.authors],
-  states: [...filters.states],
-});
+const cloneSnapshot = (filters: PrFilterSnapshot): PrFilterSnapshot => {
+  const ciStatus = filters.ciStatus ?? (filters.ciFailing ? "failing" : null);
+  return {
+    ...filters,
+    labelStates: { ...filters.labelStates },
+    repos: [...filters.repos],
+    authors: [...filters.authors],
+    states: [...filters.states],
+    ciStatus,
+    ciFailing: ciStatus === "failing",
+  };
+};
 
 export const usePrFilters = create<State>()(
   persist(
@@ -93,6 +102,7 @@ export const usePrFilters = create<State>()(
       repos: [],
       authors: [],
       states: [],
+      ciStatus: null,
       ciFailing: false,
       filterGroups: [],
       scrollPos: {},
@@ -115,7 +125,12 @@ export const usePrFilters = create<State>()(
       clearLabels: () => set({ labelStates: {} }),
       toggleState: (s) => set({ states: toggle(get().states, s) }),
       clearStates: () => set({ states: [] }),
-      toggleCiFailing: () => set({ ciFailing: !get().ciFailing }),
+      setCiStatus: (ciStatus) => set({ ciStatus, ciFailing: ciStatus === "failing" }),
+      toggleCiFailing: () => {
+        const next =
+          (get().ciStatus ?? (get().ciFailing ? "failing" : null)) === "failing" ? null : "failing";
+        set({ ciStatus: next, ciFailing: next === "failing" });
+      },
       saveFilterGroup: (name, filters) => {
         const now = Date.now();
         set({

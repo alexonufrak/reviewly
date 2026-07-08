@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/command";
 import type { PullSummary } from "@/lib/tauri";
 import { parsePullUrl, parseRepoUrl } from "@/lib/tauri";
-import type { PrFilterSnapshot, PrScope } from "@/stores/pr-filters";
+import type { CiFilter, PrFilterSnapshot, PrScope } from "@/stores/pr-filters";
 import { usePrFilters } from "@/stores/pr-filters";
 import { useUi } from "@/stores/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -280,9 +280,15 @@ function summarizeFilterSnapshot(snapshot: PrFilterSnapshot): string {
     state === "exclude" ? `-${name}` : name,
   );
   if (labels.length > 0) parts.push(labels.join(" "));
-  if (snapshot.ciFailing) parts.push("CI failing");
+  const ciStatus = ciFilterOfSnapshot(snapshot);
+  if (ciStatus === "failing") parts.push("CI failing");
+  if (ciStatus === "not-failing") parts.push("CI not failing");
   if (snapshot.groupBy !== "none") parts.push(`grouped by ${snapshot.groupBy}`);
   return parts.join(" · ");
+}
+
+function ciFilterOfSnapshot(snapshot: PrFilterSnapshot): CiFilter | null {
+  return snapshot.ciStatus ?? (snapshot.ciFailing ? "failing" : null);
 }
 
 function scopeLabel(scope: PrScope): string {
