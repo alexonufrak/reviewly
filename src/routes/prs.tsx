@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { useLocalRepos } from "@/stores/local-repos";
 import {
   type GroupBy,
+  type CiFilter,
   type PrFilterGroup,
   type PrFilterSnapshot,
   type PrScope,
@@ -36,6 +37,7 @@ import {
   ArrowUpNarrowWide,
   Bookmark,
   Check,
+  CheckCircle2,
   ChevronDown,
   Filter,
   FolderGit2,
@@ -354,8 +356,8 @@ export function PRsPage() {
           allLabels={filters.allLabels}
           labelStates={filters.labelStates}
           onCycleLabel={filters.cycleLabel}
-          ciFailing={filters.ciFailing}
-          onToggleCiFailing={filters.toggleCiFailing}
+          ciStatus={filters.ciStatus}
+          onSetCiStatus={filters.setCiStatus}
           activeCount={filters.filterCount}
           onClearAll={filters.clearAllFilters}
         />
@@ -1070,7 +1072,7 @@ function SavedViewsMenu() {
   const repos = usePrFilters((s) => s.repos);
   const authors = usePrFilters((s) => s.authors);
   const states = usePrFilters((s) => s.states);
-  const ciFailing = usePrFilters((s) => s.ciFailing);
+  const ciStatus = usePrFilters((s) => s.ciStatus ?? (s.ciFailing ? "failing" : null));
   const filterGroups = usePrFilters((s) => s.filterGroups);
   const saveFilterGroup = usePrFilters((s) => s.saveFilterGroup);
   const applyFilterGroup = usePrFilters((s) => s.applyFilterGroup);
@@ -1092,9 +1094,10 @@ function SavedViewsMenu() {
       repos,
       authors,
       states,
-      ciFailing,
+      ciStatus,
+      ciFailing: ciStatus === "failing",
     }),
-    [scope, query, sort, groupBy, labelStates, repos, authors, states, ciFailing],
+    [scope, query, sort, groupBy, labelStates, repos, authors, states, ciStatus],
   );
   const activeGroup = filterGroups.find((group) => filterSnapshotsEqual(group.filters, current));
 
@@ -1393,8 +1396,8 @@ function FilterMenu({
   allLabels,
   labelStates,
   onCycleLabel,
-  ciFailing,
-  onToggleCiFailing,
+  ciStatus,
+  onSetCiStatus,
   activeCount,
   onClearAll,
 }: {
@@ -1411,8 +1414,8 @@ function FilterMenu({
   allLabels: Label[];
   labelStates: Record<string, "include" | "exclude">;
   onCycleLabel: (name: string) => void;
-  ciFailing: boolean;
-  onToggleCiFailing: () => void;
+  ciStatus: CiFilter | null;
+  onSetCiStatus: (status: CiFilter | null) => void;
   activeCount: number;
   onClearAll: () => void;
 }) {
@@ -1424,9 +1427,9 @@ function FilterMenu({
     const out: FilterField[] = [
       {
         key: "status",
-        label: "CI failing",
+        label: "CI status",
         icon: AlertTriangle,
-        valueCount: 1,
+        valueCount: 2,
       },
     ];
     if (presentStates.length > 0) {
@@ -1505,7 +1508,6 @@ function FilterMenu({
                       onFocus={() => setActiveField(field.key)}
                       onClick={() => {
                         setActiveField(field.key);
-                        if (field.key === "status") onToggleCiFailing();
                       }}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-foreground/[0.05]",
@@ -1514,16 +1516,7 @@ function FilterMenu({
                     >
                       <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
                       <span className="min-w-0 flex-1 truncate">{field.label}</span>
-                      {field.key === "status" ? (
-                        <Check
-                          className={cn(
-                            "size-3 shrink-0",
-                            ciFailing ? "text-primary" : "opacity-0",
-                          )}
-                        />
-                      ) : (
-                        <ChevronDown className="-rotate-90 size-3.5 shrink-0 text-muted-foreground" />
-                      )}
+                      <ChevronDown className="-rotate-90 size-3.5 shrink-0 text-muted-foreground" />
                     </button>
                   );
                 })
@@ -1531,24 +1524,24 @@ function FilterMenu({
                 <p className="px-2 py-1.5 text-xs text-muted-foreground">No filters found</p>
               )}
             </div>
-            {activeField !== "status" && (
-              <FilterValueFlyout
-                field={activeField}
-                presentStates={presentStates}
-                stateCounts={stateCounts}
-                states={states}
-                onSelectState={onSelectState}
-                allRepos={allRepos}
-                repos={repos}
-                onToggleRepo={onToggleRepo}
-                allAuthors={allAuthors}
-                authors={authors}
-                onToggleAuthor={onToggleAuthor}
-                allLabels={allLabels}
-                labelStates={labelStates}
-                onCycleLabel={onCycleLabel}
-              />
-            )}
+            <FilterValueFlyout
+              field={activeField}
+              presentStates={presentStates}
+              stateCounts={stateCounts}
+              states={states}
+              onSelectState={onSelectState}
+              allRepos={allRepos}
+              repos={repos}
+              onToggleRepo={onToggleRepo}
+              allAuthors={allAuthors}
+              authors={authors}
+              onToggleAuthor={onToggleAuthor}
+              allLabels={allLabels}
+              labelStates={labelStates}
+              onCycleLabel={onCycleLabel}
+              ciStatus={ciStatus}
+              onSetCiStatus={onSetCiStatus}
+            />
             {activeCount > 0 && (
               <div className="mt-1 flex justify-end border-t border-hairline pt-1">
                 <button
@@ -1591,6 +1584,8 @@ function FilterValueFlyout({
   allLabels,
   labelStates,
   onCycleLabel,
+  ciStatus,
+  onSetCiStatus,
 }: {
   field: FilterFieldKey;
   presentStates: PrState[];
@@ -1606,6 +1601,8 @@ function FilterValueFlyout({
   allLabels: Label[];
   labelStates: Record<string, "include" | "exclude">;
   onCycleLabel: (name: string) => void;
+  ciStatus: CiFilter | null;
+  onSetCiStatus: (status: CiFilter | null) => void;
 }) {
   const [query, setQuery] = useState("");
   const config =
@@ -1619,7 +1616,9 @@ function FilterValueFlyout({
         ? { label: "repository", searchable: allRepos.length > 5, count: allRepos.length }
         : field === "author"
           ? { label: "author", searchable: allAuthors.length > 5, count: allAuthors.length }
-          : { label: "label", searchable: allLabels.length > 5, count: allLabels.length };
+          : field === "label"
+            ? { label: "label", searchable: allLabels.length > 5, count: allLabels.length }
+            : { label: "status", searchable: false, count: 2 };
   const q = query.trim().toLowerCase();
   const visibleRepos = !q ? allRepos : allRepos.filter((repo) => repo.toLowerCase().includes(q));
   const visibleAuthors = !q
@@ -1645,6 +1644,25 @@ function FilterValueFlyout({
         </div>
       )}
       <div className="max-h-80 overflow-y-auto">
+        {field === "status" && (
+          <>
+            <PopoverItem
+              icon={AlertTriangle}
+              checked={ciStatus === "failing"}
+              onClick={() => onSetCiStatus(ciStatus === "failing" ? null : "failing")}
+            >
+              CI failing
+            </PopoverItem>
+            <PopoverItem
+              icon={CheckCircle2}
+              checked={ciStatus === "not-failing"}
+              onClick={() => onSetCiStatus(ciStatus === "not-failing" ? null : "not-failing")}
+            >
+              CI not failing
+            </PopoverItem>
+          </>
+        )}
+
         {field === "state" &&
           presentStates.map((s) => (
             <PopoverItem
@@ -1769,7 +1787,7 @@ function filterSnapshotsEqual(a: PrFilterSnapshot, b: PrFilterSnapshot): boolean
     a.query === b.query &&
     a.sort === b.sort &&
     a.groupBy === b.groupBy &&
-    a.ciFailing === b.ciFailing &&
+    ciFilterOfSnapshot(a) === ciFilterOfSnapshot(b) &&
     sameStringSet(a.repos, b.repos) &&
     sameStringSet(a.authors, b.authors) &&
     sameStringSet(a.states, b.states) &&
@@ -1792,8 +1810,14 @@ function sameLabelStates(
   return aEntries.every(([name, state]) => b[name] === state);
 }
 
+function ciFilterOfSnapshot(snapshot: PrFilterSnapshot): CiFilter | null {
+  return snapshot.ciStatus ?? (snapshot.ciFailing ? "failing" : null);
+}
+
 function suggestViewName(snapshot: PrFilterSnapshot): string {
-  if (snapshot.ciFailing) return "Failing CI";
+  const ciStatus = ciFilterOfSnapshot(snapshot);
+  if (ciStatus === "failing") return "Failing CI";
+  if (ciStatus === "not-failing") return "CI Not Failing";
   if (snapshot.repos.length === 1) return `${snapshot.repos[0]} queue`;
   if (snapshot.authors.length === 1) return `${snapshot.authors[0]}'s PRs`;
   if (snapshot.states.length === 1) return `${STATE_META[snapshot.states[0]].label} PRs`;
@@ -1811,7 +1835,9 @@ function summarizeSnapshot(snapshot: PrFilterSnapshot): string {
   if (snapshot.authors.length > 0) parts.push(`${snapshot.authors.length} author`);
   const labelCount = Object.keys(snapshot.labelStates).length;
   if (labelCount > 0) parts.push(`${labelCount} label`);
-  if (snapshot.ciFailing) parts.push("CI failing");
+  const ciStatus = ciFilterOfSnapshot(snapshot);
+  if (ciStatus === "failing") parts.push("CI failing");
+  if (ciStatus === "not-failing") parts.push("CI not failing");
   if (snapshot.groupBy !== "none") parts.push(`grouped by ${snapshot.groupBy}`);
   return parts.join(" · ");
 }

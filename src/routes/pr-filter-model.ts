@@ -1,8 +1,8 @@
 import { type PrState, STATE_META, prState } from "@/components/pr-row";
 import type { CiStatus, Label, PullSummary } from "@/lib/tauri";
 import { parseRepoUrl } from "@/lib/tauri";
-import { type SortKey, usePrFilters } from "@/stores/pr-filters";
-import { AlertTriangle, FolderGit2, type LucideIcon } from "lucide-react";
+import { type CiFilter, type SortKey, usePrFilters } from "@/stores/pr-filters";
+import { AlertTriangle, CheckCircle2, FolderGit2, type LucideIcon } from "lucide-react";
 import { useDeferredValue, useMemo } from "react";
 
 export const STATE_ORDER: PrState[] = ["open", "draft", "merged", "closed"];
@@ -67,8 +67,8 @@ export function usePrFilterModel({
   const clearLabels = usePrFilters((s) => s.clearLabels);
   const toggleState = usePrFilters((s) => s.toggleState);
   const clearStates = usePrFilters((s) => s.clearStates);
-  const ciFailing = usePrFilters((s) => s.ciFailing);
-  const toggleCiFailing = usePrFilters((s) => s.toggleCiFailing);
+  const ciStatus = usePrFilters((s) => s.ciStatus ?? (s.ciFailing ? "failing" : null));
+  const setCiStatus = usePrFilters((s) => s.setCiStatus);
 
   const includeClosed = states.includes("merged") || states.includes("closed");
 
@@ -142,7 +142,8 @@ export function usePrFilterModel({
       if (states.length > 0 && !states.includes(prState(p))) return false;
       if (repos.length > 0 && !repos.includes(repoOf(p))) return false;
       if (authors.length > 0 && !authors.includes(p.user.login)) return false;
-      if (ciFailing && ciMap.get(p.number) !== "failure") return false;
+      if (ciStatus === "failing" && ciMap.get(p.number) !== "failure") return false;
+      if (ciStatus === "not-failing" && ciMap.get(p.number) === "failure") return false;
       const names = new Set(p.labels.map((l) => l.name));
       if (includeLabels.some((n) => !names.has(n))) return false;
       if (excludeLabels.some((n) => names.has(n))) return false;
@@ -162,7 +163,7 @@ export function usePrFilterModel({
           return +new Date(b.updated_at) - +new Date(a.updated_at);
       }
     });
-  }, [prs, deferredQuery, labelStates, repos, authors, states, sort, ciFailing, ciMap]);
+  }, [prs, deferredQuery, labelStates, repos, authors, states, sort, ciStatus, ciMap]);
 
   const presentStates = allOpen
     ? STATE_ORDER
@@ -173,14 +174,14 @@ export function usePrFilterModel({
     repos.length +
     authors.length +
     Object.keys(labelStates).length +
-    (ciFailing ? 1 : 0);
+    (ciStatus ? 1 : 0);
 
   function clearAllFilters() {
     clearStates();
     clearRepos();
     clearAuthors();
     clearLabels();
-    if (ciFailing) toggleCiFailing();
+    setCiStatus(null);
   }
 
   function clearAllFiltersAndQuery() {
@@ -327,14 +328,15 @@ export function usePrFilterModel({
       onRemove: clearLabels,
     });
   }
-  if (ciFailing) {
+  if (ciStatus) {
+    const label = ciStatus === "failing" ? "CI failing" : "CI not failing";
     chips.push({
       key: "ci",
       field: "Status",
-      value: "CI failing",
-      options: [{ value: "ci-failing", label: "CI failing", icon: AlertTriangle, selected: true }],
-      onSelect: () => undefined,
-      onRemove: toggleCiFailing,
+      value: label,
+      options: ciFilterOptions(ciStatus),
+      onSelect: (next) => setCiStatus(next as CiFilter),
+      onRemove: () => setCiStatus(null),
     });
   }
 
@@ -343,7 +345,8 @@ export function usePrFilterModel({
     repos,
     authors,
     states,
-    ciFailing,
+    ciStatus,
+    ciFailing: ciStatus === "failing",
     includeClosed,
     allLabels,
     allRepos,
@@ -360,8 +363,25 @@ export function usePrFilterModel({
     toggleRepo,
     toggleAuthor,
     cycleLabel,
-    toggleCiFailing,
+    setCiStatus,
   };
+}
+
+function ciFilterOptions(selected: CiFilter): ActiveFilterOption[] {
+  return [
+    {
+      value: "failing",
+      label: "CI failing",
+      icon: AlertTriangle,
+      selected: selected === "failing",
+    },
+    {
+      value: "not-failing",
+      label: "CI not failing",
+      icon: CheckCircle2,
+      selected: selected === "not-failing",
+    },
+  ];
 }
 
 function selectedSummary<T extends string>(
