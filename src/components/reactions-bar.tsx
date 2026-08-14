@@ -158,7 +158,7 @@ export function ReactionsBar({ target, owner, repo, id, pr, viewerLogin }: Props
               "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition-colors",
               mine
                 ? "border-primary/50 bg-primary/15 text-foreground"
-                : "border-border/40 bg-background/30 text-muted-foreground hover:bg-foreground/[0.04]",
+                : "border-transparent bg-foreground/[0.06] text-muted-foreground hover:bg-foreground/[0.1]",
             )}
             aria-label={`${content}, ${list.length} reaction${list.length === 1 ? "" : "s"}${
               mine ? " including yours" : ""

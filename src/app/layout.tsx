@@ -8,6 +8,7 @@ import { useClipboardSniff } from "@/app/use-clipboard-sniff";
 import { useDependabotEvents } from "@/app/use-dependabot-events";
 import { useGlobalShortcuts } from "@/app/use-global-shortcuts";
 import { useGuidedEvents } from "@/app/use-guided-events";
+import { useLayersEvents } from "@/app/use-layers-events";
 import { useNativeChrome } from "@/app/use-native-chrome";
 import { useNotifSync } from "@/app/use-notif-sync";
 import { usePrSync } from "@/app/use-pr-sync";
@@ -81,6 +82,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   useRealtimeEvents();
   usePrSync();
   useGuidedEvents();
+  useLayersEvents();
   useDependabotEvents();
   useNativeChrome();
   useNotifSync();

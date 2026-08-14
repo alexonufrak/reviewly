@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FileTree } from "@/components/file-tree";
 import { GuidedReview } from "@/components/guided-review";
 import { LabelPicker } from "@/components/label-picker";
+import { LayerBar, useLayerScope } from "@/components/layered-review";
 import { MarkdownBody } from "@/components/markdown-body";
 import { PrActions } from "@/components/pr-actions";
 import { ReactionsBar } from "@/components/reactions-bar";
@@ -87,6 +88,7 @@ import {
   Focus,
   GitCommit,
   GitPullRequest,
+  Layers,
   MessageSquare,
   OctagonX,
   Pencil,
@@ -103,6 +105,7 @@ import {
   type ComponentProps,
   type ReactElement,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -166,6 +169,7 @@ export function PRDetailPage() {
   const qc = useQueryClient();
   const view = useUi((s) => s.diffView);
   const setView = useUi((s) => s.setDiffView);
+  const diffLayout = useUi((s) => s.diffLayout);
   const focusMode = useUi((s) => s.focusMode);
   const toggleFocus = useUi((s) => s.toggleFocusMode);
   // The string key the per-PR view store (and review-draft store) is keyed by.
@@ -424,18 +428,36 @@ export function PRDetailPage() {
           ? "text-success"
           : "text-muted-foreground";
   const fileList = files.data ?? [];
-  const current = activeFile ?? fileList[0]?.filename ?? null;
-  const currentFile = fileList.find((f) => f.filename === current) ?? null;
-  // Cmd+P filter — narrows the file tree by filename (case-insensitive).
-  const visibleFiles = fileFilter.trim()
-    ? fileList.filter((f) => f.filename.toLowerCase().includes(fileFilter.trim().toLowerCase()))
-    : fileList;
   const filteredThreads = threads.data ?? [];
 
   // Viewed-files state, also used to drive "mark viewed & next".
   const vk = headSha ? viewedKey(owner, repo, number, headSha) : null;
   const viewedMap = useViewedFiles((s) => (vk ? s.viewed[vk] : undefined));
   const setViewedFile = useViewedFiles((s) => s.setViewed);
+
+  // Layered review: the plan cuts the PR into slices, and the whole review loop
+  // — file tree, [ / ], n — narrows to the slice being read, so a 60-file PR is
+  // worked through a few coherent files at a time instead of all at once.
+  const layers = useLayerScope({
+    prKey: prViewKey,
+    files: fileList,
+    enabled: tab === "files" && view === "layered",
+    headSha,
+    viewedKey: vk,
+  });
+  const scopedFiles = layers.active ? layers.scopedFiles : fileList;
+  // Inside a layer, a file from another layer must never stay open — otherwise
+  // the diff pane and the tree disagree about what's being reviewed.
+  const current = layers.active
+    ? activeFile && scopedFiles.some((f) => f.filename === activeFile)
+      ? activeFile
+      : (scopedFiles[0]?.filename ?? null)
+    : (activeFile ?? fileList[0]?.filename ?? null);
+  const currentFile = fileList.find((f) => f.filename === current) ?? null;
+  // Cmd+P filter — narrows the file tree by filename (case-insensitive).
+  const visibleFiles = fileFilter.trim()
+    ? scopedFiles.filter((f) => f.filename.toLowerCase().includes(fileFilter.trim().toLowerCase()))
+    : scopedFiles;
   const autoMarkViewed = useReviewPrefs((s) => s.autoMarkViewed);
   const autoReadyOnReview = useReviewPrefs((s) => s.autoReadyOnReview);
   const diffDensity = useReviewPrefs((s) => s.diffDensity);
@@ -488,10 +510,10 @@ export function PRDetailPage() {
     }
   }
 
-  function markViewedAndNext() {
+  const markViewedAndNext = useCallback(() => {
     if (!vk || !current) return;
     setViewedFile(vk, current, true);
-    const order = fileList.map((f) => f.filename);
+    const order = scopedFiles.map((f) => f.filename);
     const start = order.indexOf(current);
     for (let step = 1; step <= order.length; step++) {
       const cand = order[(start + step) % order.length];
@@ -500,7 +522,16 @@ export function PRDetailPage() {
         return;
       }
     }
-  }
+    // Layered review: this slice is finished, so carry the reviewer into the
+    // next unread one instead of stranding them on a fully-read layer.
+    const next = layers.active ? layers.advance() : null;
+    if (next) {
+      const fresh = useViewedFiles.getState().viewed[vk];
+      const target = next.files.find((p) => !fresh?.[p]) ?? next.files[0];
+      if (target) setActiveFile(target);
+      toast.success(`Next layer · ${next.title}`);
+    }
+  }, [vk, current, scopedFiles, viewedMap, setViewedFile, layers]);
 
   // Review-loop keyboard nav on the Files tab: ] / [ next/prev file, n marks the
   // current file viewed and jumps to the next unviewed one. Ignored while typing.
@@ -512,7 +543,9 @@ export function PRDetailPage() {
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const order = fileList.map((f) => f.filename);
+      // In layered review this is the active layer's files, so the whole loop
+      // stays inside the slice being read; `n` hands off to the next layer.
+      const order = scopedFiles.map((f) => f.filename);
       if (order.length === 0) return;
       const cur = current ?? order[0];
       const idx = order.indexOf(cur);
@@ -524,16 +557,7 @@ export function PRDetailPage() {
         setActiveFile(order[(idx - 1 + order.length) % order.length]);
       } else if (e.key === "n") {
         e.preventDefault();
-        if (vk && cur) {
-          setViewedFile(vk, cur, true);
-          for (let s = 1; s <= order.length; s++) {
-            const cand = order[(idx + s) % order.length];
-            if (cand !== cur && !viewedMap?.[cand]) {
-              setActiveFile(cand);
-              break;
-            }
-          }
-        }
+        markViewedAndNext();
       } else if (e.key === "c") {
         // Jump to the next file with open inline-comment threads (item 20),
         // wrapping around. Uses the same unresolved-thread counts as the
@@ -554,7 +578,7 @@ export function PRDetailPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab, fileList, current, viewedMap, vk, setViewedFile, commentCounts]);
+  }, [tab, scopedFiles, current, viewedMap, vk, setViewedFile, commentCounts, markViewedAndNext]);
 
   // Review-screen search: Cmd/Ctrl+F opens find-in-diff; Cmd/Ctrl+P jumps to the
   // file-tree filter. Both pull you to the Files tab first. Cmd+P also overrides
@@ -876,7 +900,7 @@ export function PRDetailPage() {
                     if (e.key === "Escape") setEditingTitle(false);
                   }}
                   onBlur={() => setEditingTitle(false)}
-                  className="min-w-0 flex-1 rounded-md border border-border/40 bg-background/40 px-2 py-0.5 text-base font-medium text-foreground outline-none focus:border-primary/50"
+                  className="min-w-0 flex-1 rounded-md bg-foreground/[0.06] px-2 py-0.5 text-base font-medium text-foreground outline-none focus:bg-foreground/[0.09]"
                 />
               ) : (
                 <>
@@ -1132,7 +1156,7 @@ export function PRDetailPage() {
                   </button>
                 </TooltipFor>
               )}
-              <div className="inline-flex h-7 items-center rounded-md border border-border p-0.5">
+              <div className="inline-flex h-7 items-center rounded-lg bg-foreground/[0.05] p-0.5">
                 <TooltipFor label="Unified diff" shortcut="⌘B">
                   <button
                     type="button"
@@ -1163,6 +1187,22 @@ export function PRDetailPage() {
                     )}
                   >
                     <Columns2 className="size-3.5" />
+                  </button>
+                </TooltipFor>
+                <TooltipFor label="Layered review — read the PR in logical slices">
+                  <button
+                    type="button"
+                    onClick={() => setView("layered")}
+                    aria-label="Layered review"
+                    aria-pressed={view === "layered"}
+                    className={cn(
+                      "flex size-6 items-center justify-center rounded transition-colors",
+                      view === "layered"
+                        ? "bg-foreground/[0.08] text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Layers className="size-3.5" />
                   </button>
                 </TooltipFor>
                 <TooltipFor label="Guided review — AI walks you through it">
@@ -1219,6 +1259,19 @@ export function PRDetailPage() {
           />
         )}
 
+        {/* Waits for the file list — a "split 0 files" prompt would flash on load. */}
+        {tab === "files" && view === "layered" && fileList.length > 0 && (
+          <LayerBar
+            scope={layers}
+            prKey={prViewKey}
+            context={reviewContext}
+            files={fileList}
+            headSha={headSha}
+            viewedKey={vk}
+            onSelectFile={setActiveFile}
+          />
+        )}
+
         {tab === "files" && view !== "guided" && (
           <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
             <ResizablePanel defaultSize={22} minSize={15}>
@@ -1262,7 +1315,14 @@ export function PRDetailPage() {
                     <DiffViewer
                       path={currentFile.filename}
                       patch={currentFile.patch}
-                      view={view === "split" ? "split" : "unified"}
+                      // Layered review is a mode on top of a layout, not a
+                      // layout of its own — keep rendering the diff the way the
+                      // reviewer last chose.
+                      view={
+                        view === "split" || (view === "layered" && diffLayout === "split")
+                          ? "split"
+                          : "unified"
+                      }
                       threads={filteredThreads.filter((t) => t.path === currentFile.filename)}
                       onAddComment={(c) => addComment(prKey, c)}
                       owner={owner}

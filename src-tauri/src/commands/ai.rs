@@ -198,6 +198,27 @@ fn cli_error(name: &str, code: &str, stderr: &str) -> AppError {
     AppError::Other(msg)
 }
 
+/// The CLI's own failure text. Some CLIs — Claude among them — print the reason
+/// on STDOUT and leave stderr EMPTY, so fall back to stdout: otherwise the real
+/// cause (an expired login, an invalid model) is swallowed and the user is left
+/// with the useless generic "produced no output".
+fn cli_detail(stdout: &[u8], stderr: &[u8]) -> String {
+    let err = String::from_utf8_lossy(stderr).trim().to_string();
+    if !err.is_empty() {
+        return err;
+    }
+    String::from_utf8_lossy(stdout).trim().to_string()
+}
+
+/// Exit code as a bare number ("1"). `ExitStatus`'s Display is "exit status: 1",
+/// which would render as "exit exit status: 1" in the messages above.
+fn exit_code(status: &std::process::ExitStatus) -> String {
+    status
+        .code()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "signal".to_string())
+}
+
 /// True when the selected provider's CLI is available in PATH. The OpenAI-
 /// compatible provider has no binary — it's gated on a configured base URL in
 /// the UI — so report it as available here.
@@ -384,8 +405,8 @@ async fn run_claude(
     if !output.status.success() {
         return Err(cli_error(
             "claude",
-            &output.status.to_string(),
-            String::from_utf8_lossy(&output.stderr).trim(),
+            &exit_code(&output.status),
+            &cli_detail(&output.stdout, &output.stderr),
         ));
     }
     let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -393,7 +414,7 @@ async fn run_claude(
         return Err(cli_error(
             "claude",
             "0",
-            String::from_utf8_lossy(&output.stderr).trim(),
+            &cli_detail(&output.stdout, &output.stderr),
         ));
     }
     Ok(out)
@@ -493,8 +514,8 @@ async fn run_codex(
         let _ = tokio::fs::remove_file(&out_path).await;
         return Err(cli_error(
             "codex",
-            &output.status.to_string(),
-            String::from_utf8_lossy(&output.stderr).trim(),
+            &exit_code(&output.status),
+            &cli_detail(&output.stdout, &output.stderr),
         ));
     }
 
@@ -506,8 +527,8 @@ async fn run_codex(
     if text.is_empty() {
         return Err(cli_error(
             "codex",
-            &output.status.to_string(),
-            String::from_utf8_lossy(&output.stderr).trim(),
+            &exit_code(&output.status),
+            &cli_detail(&output.stdout, &output.stderr),
         ));
     }
     Ok(text)
@@ -546,8 +567,8 @@ async fn run_gemini(
     if !output.status.success() {
         return Err(cli_error(
             "gemini",
-            &output.status.to_string(),
-            String::from_utf8_lossy(&output.stderr).trim(),
+            &exit_code(&output.status),
+            &cli_detail(&output.stdout, &output.stderr),
         ));
     }
     let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -555,7 +576,7 @@ async fn run_gemini(
         return Err(cli_error(
             "gemini",
             "0",
-            String::from_utf8_lossy(&output.stderr).trim(),
+            &cli_detail(&output.stdout, &output.stderr),
         ));
     }
     Ok(out)
@@ -758,6 +779,9 @@ async fn stream_claude(
         .ok_or_else(|| AppError::Other("claude: no stdout".into()))?;
     let mut lines = BufReader::new(stdout).lines();
     let mut full = String::new();
+    // Non-stream-json stdout lines: Claude prints failures (expired login, bad
+    // model) as plain text there, so keep them to explain an empty run.
+    let mut noise = String::new();
     let mut cost: Option<f64> = None;
 
     let read = async {
@@ -770,6 +794,10 @@ async fn stream_claude(
                 continue;
             }
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+                if noise.len() < 1000 {
+                    noise.push_str(line.trim());
+                    noise.push('\n');
+                }
                 continue;
             };
             match v.get("type").and_then(|t| t.as_str()) {
@@ -815,9 +843,10 @@ async fn stream_claude(
             )))
         }
     }
-    let _ = child.wait().await;
+    let status = child.wait().await.ok();
     if full.is_empty() {
-        return Err(AppError::Other("claude returned no output".into()));
+        let code = status.map(|s| exit_code(&s)).unwrap_or_else(|| "?".to_string());
+        return Err(cli_error("claude", &code, noise.trim()));
     }
     Ok((full, cost))
 }

@@ -246,11 +246,11 @@ export function RepoDetailPage() {
           <button
             type="button"
             onClick={() => setQuickOpen(true)}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-card/40 px-2 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.09] hover:text-foreground"
           >
             <Search className="size-3.5" />
             Go to file
-            <kbd className="rounded border border-border/40 bg-background/40 px-1 py-px font-mono text-[10px] text-muted-foreground/70">
+            <kbd className="rounded bg-foreground/[0.08] px-1 py-px font-mono text-[11px] text-muted-foreground">
               ⌘P
             </kbd>
           </button>
@@ -623,7 +623,7 @@ function RepoToolbar({ path }: { path: string }) {
             </span>
           }
         >
-          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-border/40 bg-card/40 px-2 text-xs text-muted-foreground">
+          <span className="inline-flex h-7 items-center gap-1 rounded-md bg-foreground/[0.05] px-2 text-xs text-muted-foreground">
             <Layers className="size-3" />
             {worktrees.data.length}
           </span>
@@ -881,7 +881,7 @@ function BranchMenu({
         type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
-        className="inline-flex h-7 max-w-48 items-center gap-1.5 rounded-md border border-border/40 bg-card/40 px-2 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground disabled:opacity-50"
+        className="inline-flex h-7 max-w-48 items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.09] hover:text-foreground disabled:opacity-50"
       >
         <GitBranch className="size-3.5 shrink-0" />
         <span className="truncate text-foreground">{branches.current}</span>

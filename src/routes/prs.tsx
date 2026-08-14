@@ -1015,7 +1015,7 @@ function KeyHint({
     <span
       className={cn("inline-flex items-center gap-1 whitespace-nowrap", disabled && "opacity-45")}
     >
-      <kbd className="flex h-4 min-w-4 items-center justify-center rounded border border-border/70 bg-foreground/[0.06] px-1 font-mono text-[10px] text-foreground">
+      <kbd className="flex h-4 min-w-4 items-center justify-center rounded bg-foreground/[0.1] px-1 font-mono text-[11px] text-foreground">
         {keys}
       </kbd>
       <span>{label}</span>

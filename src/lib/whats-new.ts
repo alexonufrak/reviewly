@@ -17,6 +17,32 @@ export interface WhatsNewEntry {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.1.8",
+    date: "2026-08-14",
+    items: [
+      {
+        title: "Layered review",
+        detail:
+          "Cut a big PR into a few coherent layers and read them in dependency order — the file tree, [ / ], and n all narrow to the layer you're on.",
+      },
+      {
+        title: "Split with AI, or instantly",
+        detail:
+          "“Plan with AI” groups files by what they do; “Split by structure” is offline and needs no CLI.",
+      },
+      {
+        title: "Quieter, more readable UI",
+        detail:
+          "Labels, shortcuts, inputs, and the diff gutter lost their outlines — structure now comes from tint, not from lines. Secondary text got a contrast lift.",
+      },
+      {
+        title: "Clearer AI failures",
+        detail:
+          "When a provider CLI fails, its actual reason surfaces instead of “produced no output”.",
+      },
+    ],
+  },
+  {
     version: "0.1.7",
     date: "2026-07-08",
     items: [

@@ -1,3 +1,5 @@
+import { extractObjects, firstString, stripFence, toArray, toInt, tryJson } from "@/lib/ai/json";
+
 /** What a stop on the guided tour is about. */
 export type StepKind = "orient" | "concern" | "question" | "praise";
 
@@ -73,13 +75,6 @@ function toKind(raw: unknown): StepKind {
   return s ? "concern" : "orient";
 }
 
-/** Number, or numeric string ("42"), → rounded int; else null. */
-function toInt(v: unknown): number | null {
-  const n =
-    typeof v === "number" ? v : typeof v === "string" ? Number.parseInt(v.trim(), 10) : Number.NaN;
-  return Number.isFinite(n) ? Math.round(n) : null;
-}
-
 /** Normalize one raw step object → GuidedStep, or null if it lacks a usable
  * path + line anchor. Tolerant of numeric-string lines and near-miss kinds. */
 function toStep(p: unknown): GuidedStep | null {
@@ -102,73 +97,6 @@ function toStep(p: unknown): GuidedStep | null {
     detail: typeof o.detail === "string" ? o.detail : "",
     suggestion,
   };
-}
-
-/** Coerce a steps value to an array — accepts an array OR an object/map (a
- * common shape when a weaker model "numbers" its steps: `{"0":{…},"1":{…}}`). */
-function toStepArray(v: unknown): unknown[] {
-  if (Array.isArray(v)) return v;
-  if (v && typeof v === "object") return Object.values(v as Record<string, unknown>);
-  return [];
-}
-
-function tryJson(s: string): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    // Repair the single most common LLM JSON defect — a trailing comma before a
-    // closing } or ] — and retry once. Benefits the fast path and per-object
-    // salvage alike (both go through here).
-    try {
-      return JSON.parse(s.replace(/,(\s*[}\]])/g, "$1"));
-    } catch {
-      return undefined;
-    }
-  }
-}
-
-/** Pull every top-level balanced `{…}` object out of `src`, parsing each on its
- * own. A trailing object that's truncated/garbled is simply skipped — so a tour
- * whose JSON got cut off mid-array still yields all the complete steps. */
-function extractObjects(src: string): unknown[] {
-  const out: unknown[] = [];
-  let depth = 0;
-  let startIdx = -1;
-  let inStr = false;
-  let esc = false;
-  for (let i = 0; i < src.length; i++) {
-    const ch = src[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
-      continue;
-    }
-    if (ch === '"') {
-      inStr = true;
-    } else if (ch === "{") {
-      if (depth === 0) startIdx = i;
-      depth++;
-    } else if (ch === "}") {
-      if (depth > 0) depth--;
-      if (depth === 0 && startIdx >= 0) {
-        const parsed = tryJson(src.slice(startIdx, i + 1));
-        if (parsed !== undefined) out.push(parsed);
-        startIdx = -1;
-      }
-    }
-  }
-  return out;
-}
-
-function firstString(content: string, key: string): string {
-  const m = content.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
-  if (!m) return "";
-  try {
-    return JSON.parse(`"${m[1]}"`);
-  } catch {
-    return m[1];
-  }
 }
 
 /** Last-ditch recovery when the reply isn't valid JSON: scrape the steps array
@@ -200,10 +128,7 @@ function salvage(content: string): { summary: string; tour: string; steps: unkno
 export function parseGuided(content: string): GuidedPlan | null {
   // De-fence a wrapping ```json … ``` while leaving internal markdown fences
   // (inside a step's `detail`) intact.
-  const s = content
-    .trim()
-    .replace(/^```[a-z]*\s*\n?/i, "")
-    .replace(/\n?```\s*$/i, "");
+  const s = stripFence(content);
 
   let summary = "";
   let tour = "";
@@ -218,7 +143,7 @@ export function parseGuided(content: string): GuidedPlan | null {
   const planObj = [...objs].reverse().find((o) => {
     if (!o || typeof o !== "object") return false;
     const r = o as Record<string, unknown>;
-    return toStepArray(r.steps).length > 0 || toStepArray(r.points).length > 0;
+    return toArray(r.steps).length > 0 || toArray(r.points).length > 0;
   }) as Record<string, unknown> | undefined;
 
   const obj =
@@ -231,8 +156,8 @@ export function parseGuided(content: string): GuidedPlan | null {
 
   if (obj && typeof obj === "object") {
     const r = obj as Record<string, unknown>;
-    rawSteps = toStepArray(r.steps);
-    if (rawSteps.length === 0) rawSteps = toStepArray(r.points);
+    rawSteps = toArray(r.steps);
+    if (rawSteps.length === 0) rawSteps = toArray(r.points);
     summary = typeof r.summary === "string" ? r.summary : "";
     tour = typeof r.tour === "string" ? r.tour : "";
     verdict = toVerdict(r.verdict);

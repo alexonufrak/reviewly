@@ -8,9 +8,6 @@ import type { ComponentProps } from "react";
  */
 export function Card({ className, ...props }: ComponentProps<"div">) {
   return (
-    <div
-      className={cn("rounded-xl border border-border/40 bg-card/50 p-5", className)}
-      {...props}
-    />
+    <div className={cn("rounded-xl border border-hairline bg-card/50 p-5", className)} {...props} />
   );
 }

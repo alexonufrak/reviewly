@@ -95,3 +95,18 @@ export function buildReviewContext(
 
   return `${head}\n\n## Diff\n\n${blocks.join("\n\n")}${footer}`;
 }
+
+/**
+ * The review context plus an EXHAUSTIVE list of the PR's paths, for the layered
+ * planner. The diff itself is budget-bounded — on a large PR some files are
+ * truncated or dropped entirely — but a layering must account for every single
+ * file, so the planner gets the full inventory even when it can't see every
+ * patch. It doubles as the planner's checklist and as the only paths it's
+ * allowed to name.
+ */
+export function buildLayerContext(context: string, files: PullFile[]): string {
+  const inventory = files
+    .map((f) => `${f.filename} (${f.status}, +${f.additions} / -${f.deletions})`)
+    .join("\n");
+  return `${context}\n\n## Complete file list (${files.length} files — every one must land in exactly one layer)\n${inventory}`;
+}

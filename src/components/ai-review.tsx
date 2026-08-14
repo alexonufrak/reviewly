@@ -217,7 +217,7 @@ export function AiReview({ prKey, context, executeAction }: Props) {
         {streaming &&
           (streamText ? (
             <div className="space-y-1">
-              <div className="break-words rounded-2xl rounded-bl-sm border border-border/40 bg-card/65 px-3 py-2 text-xs">
+              <div className="break-words rounded-2xl rounded-bl-sm border border-hairline bg-card/65 px-3 py-2 text-xs">
                 <MarkdownBody>{streamText}</MarkdownBody>
                 <span className="ml-0.5 inline-block h-3.5 w-[3px] translate-y-0.5 animate-pulse rounded-full bg-primary/70 align-middle" />
               </div>
@@ -230,7 +230,7 @@ export function AiReview({ prKey, context, executeAction }: Props) {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 rounded-2xl rounded-bl-sm border border-border/40 bg-card/65 px-3 py-2.5">
+            <div className="flex items-center gap-2.5 rounded-2xl rounded-bl-sm border border-hairline bg-card/65 px-3 py-2.5">
               <TypingDots />
               <span className="text-xs text-muted-foreground">
                 {PROVIDER_LABEL[provider]} is thinking…
@@ -340,7 +340,7 @@ function AssistantMessage({
   return (
     <div className="group/msg min-w-0 space-y-2">
       {text && (
-        <div className="relative break-words rounded-2xl rounded-bl-sm border border-border/40 bg-card/65 px-3 py-2 text-xs">
+        <div className="relative break-words rounded-2xl rounded-bl-sm border border-hairline bg-card/65 px-3 py-2 text-xs">
           <MarkdownBody>{text}</MarkdownBody>
           {/* 68: hover Copy on the assistant bubble. */}
           <Button

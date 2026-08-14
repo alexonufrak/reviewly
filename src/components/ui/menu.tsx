@@ -241,7 +241,7 @@ export function MenuShortcut({
   return (
     <kbd
       className={cn(
-        "ms-auto rounded border border-border/40 bg-background/30 px-1 py-px font-mono text-[10px] text-muted-foreground",
+        "ms-auto rounded bg-foreground/[0.08] px-1 py-px font-mono text-[11px] text-muted-foreground",
         className,
       )}
       data-slot="menu-shortcut"

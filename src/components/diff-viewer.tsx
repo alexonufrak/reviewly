@@ -411,7 +411,7 @@ export function DiffViewer({
               <button
                 type="button"
                 onClick={() => setNullPatchExpanded(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-foreground/[0.04] px-2.5 py-1 text-foreground transition-colors hover:bg-primary/10"
+                className="inline-flex items-center gap-1.5 rounded-md bg-foreground/[0.07] px-2.5 py-1 text-foreground transition-colors hover:bg-primary/15"
               >
                 <UnfoldVertical className="size-3.5 text-primary/80" />
                 Load full file ({fullLines.length} lines)
@@ -426,7 +426,7 @@ export function DiffViewer({
             <button
               type="button"
               onClick={() => safeOpenUrl(permalink())}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-foreground transition-colors hover:bg-foreground/[0.06]"
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-foreground transition-colors hover:bg-foreground/[0.07]"
             >
               <ExternalLink className="size-3.5" />
               Open on GitHub
@@ -756,7 +756,7 @@ function parseHunkHeader(text: string): { range: string; symbol: string } {
 function HunkHeaderBar({ text, gutter }: { text: string; gutter?: string }) {
   const { range, symbol } = parseHunkHeader(text);
   return (
-    <div className="sticky top-0 z-10 flex border-y border-border/40 bg-card/95 shadow-[0_1px_0_var(--color-border)] backdrop-blur-md">
+    <div className="sticky top-0 z-10 flex border-y border-hairline bg-card/95 backdrop-blur-md">
       {gutter && <span className={cn("shrink-0", gutter)} />}
       <pre className="flex-1 select-text truncate px-3 py-1 text-xs">
         {symbol ? (
@@ -1296,14 +1296,14 @@ function Gutter({
   const isInteractive = num != null && side != null && ui != null;
   if (!isInteractive) {
     return (
-      <span className="select-none w-10 shrink-0 border-r border-border/30 px-2 py-px text-right text-xs text-muted-foreground/70 tabular-nums">
+      <span className="select-none w-10 shrink-0 border-r border-hairline px-2 py-px text-right text-xs text-muted-foreground/80 tabular-nums">
         {num ?? ""}
       </span>
     );
   }
   return (
     <span
-      className="select-none w-10 shrink-0 cursor-ns-resize border-r border-border/30 px-2 py-px text-right text-xs text-muted-foreground/70 tabular-nums hover:bg-primary/15 hover:text-primary"
+      className="select-none w-10 shrink-0 cursor-ns-resize border-r border-hairline px-2 py-px text-right text-xs text-muted-foreground/80 tabular-nums hover:bg-primary/15 hover:text-primary"
       onMouseDown={(e) => {
         if (e.button !== 0) return;
         e.preventDefault();

@@ -172,7 +172,6 @@ export function FileTree({
   const [filter, setFilter] = useState("");
   const viewedMap = useViewedFiles((s) => (viewedKey ? s.viewed[viewedKey] : undefined));
   const setViewed = useViewedFiles((s) => s.setViewed);
-  const viewedCount = viewedMap ? Object.keys(viewedMap).length : 0;
 
   // Per-folder collapse state, persisted per-PR (keyed by viewedKey).
   const collapsedMap = useViewedFiles((s) => (viewedKey ? s.collapsed[viewedKey] : undefined));
@@ -185,6 +184,12 @@ export function FileTree({
   }, [files]);
 
   const hiddenCount = classified.filter((c) => c.reason !== null).length;
+
+  // Counted over the files this tree is actually showing, not over every viewed
+  // path in the PR — `files` is already narrowed by the ⌘P filter and, in
+  // layered review, to a single layer, and the PR-wide count would read as
+  // nonsense against that total ("12 of 3 viewed").
+  const viewedCount = classified.filter((c) => viewedMap?.[c.file.filename]).length;
 
   const visibleFiles = useMemo(() => {
     let out = classified;
@@ -371,7 +376,7 @@ export function FileTree({
             }}
             placeholder="Filter files…"
             aria-label="Filter files"
-            className="h-6 w-full rounded border border-border/40 bg-background/40 pl-6 pr-6 text-xs text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-primary/50"
+            className="h-6 w-full rounded bg-foreground/[0.05] pl-6 pr-6 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:bg-foreground/[0.08]"
           />
           {filter && (
             <button

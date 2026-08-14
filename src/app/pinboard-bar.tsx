@@ -62,7 +62,7 @@ export function PinboardBar() {
   return (
     <div className="group/pinbar border-t border-hairline bg-background/95 shadow-[0_-1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl">
       <div className="flex h-8 items-center gap-2 px-2.5">
-        <div className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md border border-border/35 bg-foreground/[0.035] px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+        <div className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.07] px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
           <Pin className="size-3" />
           <span>{items.length}</span>
         </div>

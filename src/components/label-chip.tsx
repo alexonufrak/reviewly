@@ -7,28 +7,29 @@ interface Props {
 }
 
 /**
- * Render a GitHub label as a soft, borderless chip. The label color shows
- * up as a tinted background + matching foreground; no outline competes with
- * the rest of the dark UI.
+ * Render a GitHub label as a soft, truly borderless chip.
+ *
+ * A PR header can carry a dozen of these side by side, so an outline on each
+ * one is the single biggest source of visual noise in the app — a row of tiny
+ * caged boxes. The chip reads by FILL alone: a tint of the label's own color,
+ * strong enough to hold its shape without a ring, plus text in that same hue.
  */
 export function LabelChip({ label, className }: Props) {
   const hex = normalizeHex(label.color);
   const isLight =
     typeof document !== "undefined" && document.documentElement.classList.contains("light");
-  // Tinted background + readable foreground, tuned per theme: bright text on a
-  // faint tint in dark, dark saturated text on a slightly stronger tint in light.
-  const bg = hexToRgba(hex, isLight ? 0.18 : 0.12);
+  // Tint carries the whole chip now that nothing outlines it, so it's stronger
+  // than it was — enough that even a pale label holds its shape against the
+  // surface. Light mode needs more: a faint wash over near-white disappears.
+  const bg = hexToRgba(hex, isLight ? 0.24 : 0.17);
   const fg = readableTextColor(hex, isLight);
-  // A faint inset ring in the label's own color gives pale chips an edge so they
-  // don't bleed into the surface; light mode leans on a neutral black hairline.
-  const ring = isLight ? "rgba(0, 0, 0, 0.05)" : hexToRgba(hex, 0.2);
   return (
     <span
       className={cn(
         "inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium leading-normal tracking-tight",
         className,
       )}
-      style={{ background: bg, color: fg, boxShadow: `inset 0 0 0 1px ${ring}` }}
+      style={{ background: bg, color: fg }}
       aria-label={label.description ?? label.name}
     >
       {label.name}

@@ -95,7 +95,7 @@ The **PR detail** view organizes a pull request into four tabs — **Files**, **
 
 The diff viewer is the centerpiece:
 
-- **Unified or split** view, toggled with `⌘B`.
+- **Unified or split** view, toggled with `⌘B` — including inside layered review, which is a mode *on top of* your layout, not a replacement for it.
 - **Syntax highlighting** per language (Prism).
 - **Expand context** — unfold the unchanged lines between hunks to see the full surrounding file.
 - **Hide whitespace-only** changes and **wrap long lines** on demand.
@@ -115,7 +115,9 @@ Reviewly batches your feedback into a single GitHub review, just like the web UI
 
 ### AI review
 
-Reviewly drives an AI you control — a local CLI or your own endpoint — to help you understand a change. Two modes:
+Reviewly drives an AI you control — a local CLI or your own endpoint — to help you understand a change. Three modes:
+
+**Layered review.** For the PR that touches 60 files. Instead of one alphabetical wall of diff, the change is cut into a handful of coherent layers — schema, then the types written against it, then the logic, the API surface, the UI, and the tests — and you read them **one at a time, in dependency order**. The whole review loop narrows to the layer you're on: the file tree, `[` / `]`, and `n` all stay inside it, and `n` hands you off to the next layer when the current one is done. Each layer carries a short briefing (what it changes, why it's read here, 1–3 things to check) and a risk chip, and progress comes straight from your viewed-files marks, so the stepper always matches what you've actually read. Two ways to split: **Plan with AI** for semantic layers, or **Split by structure** — instant, offline, no CLI needed. Plans are saved per-PR and reconciled against the diff on every open, so files pushed later resurface instead of quietly falling out of the review.
 
 **Guided tour.** One click and the AI reads the whole PR and walks you through it in a sensible order: the core change first, then what depends on it. Each step is one of *orientation*, *worth a comment*, *question*, or *praise*, and can jump you to the relevant file/line or pre-fill a suggested inline comment. The tour is generated in the background (so it survives navigation), saved per-PR, and knows to offer a regenerate when the PR's head commit changes.
 

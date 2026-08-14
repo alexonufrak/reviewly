@@ -2,7 +2,11 @@ import { sqlStorage } from "@/lib/sql-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type DiffView = "unified" | "split" | "guided";
+export type DiffView = "unified" | "split" | "layered" | "guided";
+
+/** The two ways a diff can be laid out. "layered" and "guided" are review modes
+ * on top of one of these, not layouts of their own. */
+export type DiffLayout = "unified" | "split";
 
 interface UiState {
   paletteOpen: boolean;
@@ -25,6 +29,9 @@ interface UiState {
   diffView: DiffView;
   setDiffView: (v: DiffView) => void;
   toggleDiffView: () => void;
+  /** Last inline/side-by-side choice, so layered review can keep rendering the
+   * diff the way the reviewer likes it instead of forcing unified. */
+  diffLayout: DiffLayout;
 
   focusMode: boolean;
   setFocusMode: (v: boolean) => void;
@@ -67,10 +74,24 @@ export const useUi = create<UiState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
       diffView: "unified",
-      setDiffView: (diffView) => set({ diffView }),
-      // ⌘B cycles unified ↔ split only (guided is its own explicit toggle).
+      diffLayout: "unified",
+      setDiffView: (diffView) =>
+        set(
+          diffView === "unified" || diffView === "split"
+            ? { diffView, diffLayout: diffView }
+            : { diffView },
+        ),
+      // ⌘B cycles unified ↔ split only (layered/guided are explicit toggles).
       toggleDiffView: () =>
-        set((s) => ({ diffView: s.diffView === "split" ? "unified" : "split" })),
+        set((s) => {
+          // Inside layered review, flip the layout *within* the mode — ⌘B must
+          // not throw the reviewer out of the layers they're working through.
+          if (s.diffView === "layered") {
+            return { diffLayout: s.diffLayout === "split" ? "unified" : "split" };
+          }
+          const next = s.diffView === "split" ? "unified" : "split";
+          return { diffView: next, diffLayout: next };
+        }),
 
       focusMode: false,
       setFocusMode: (focusMode) => set({ focusMode }),
@@ -84,10 +105,14 @@ export const useUi = create<UiState>()(
     }),
     {
       name: "reviewly.ui",
-      storage: sqlStorage<Pick<UiState, "diffView" | "sidebarCollapsed" | "zoom" | "focusMode">>(),
+      storage:
+        sqlStorage<
+          Pick<UiState, "diffView" | "diffLayout" | "sidebarCollapsed" | "zoom" | "focusMode">
+        >(),
       // Persist genuine prefs; transient flags (palette/about) stay in memory.
       partialize: (s) => ({
         diffView: s.diffView,
+        diffLayout: s.diffLayout,
         sidebarCollapsed: s.sidebarCollapsed,
         zoom: s.zoom,
         focusMode: s.focusMode,

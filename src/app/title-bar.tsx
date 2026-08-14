@@ -125,7 +125,7 @@ export function TitleBar() {
 
       <div data-no-drag className="ml-auto flex items-center gap-2.5">
         <SyncStatus />
-        <div className="flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-card/40 px-2 transition-colors focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30">
+        <div className="flex h-7 items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 transition-colors focus-within:bg-foreground/[0.08] focus-within:ring-1 focus-within:ring-primary/30">
           <Search className="size-3.5 text-muted-foreground/70" />
           <input
             type="text"
@@ -154,9 +154,7 @@ export function TitleBar() {
           type="button"
           className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
         >
-          <kbd className="rounded border border-border/40 bg-card/40 px-1 py-px font-mono text-xs">
-            ⌘K
-          </kbd>
+          <kbd className="rounded bg-foreground/[0.08] px-1 py-px font-mono text-xs">⌘K</kbd>
         </button>
       </div>
     </div>

@@ -90,7 +90,7 @@ function Keys({ keys }: { keys: string[] }) {
       {keys.map((k, i) => (
         <kbd
           key={`${k}-${i}`}
-          className="inline-flex min-w-5 items-center justify-center rounded border border-border/50 bg-card/60 px-1.5 py-0.5 font-mono text-[11px] leading-none text-foreground/80"
+          className="inline-flex min-w-5 items-center justify-center rounded bg-foreground/[0.08] px-1.5 py-0.5 font-mono text-[11px] leading-none text-foreground/90"
         >
           {k}
         </kbd>

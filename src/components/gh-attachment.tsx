@@ -37,7 +37,7 @@ export function GhAttachment({ url, alt }: Props) {
 
   if (q.isLoading) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md border border-border/30 bg-background/30 px-2 py-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5 rounded-md bg-foreground/[0.06] px-2 py-1 text-xs text-muted-foreground">
         <Loader2 className="size-3 animate-spin" />
         Loading attachment…
       </span>
@@ -62,7 +62,7 @@ export function GhAttachment({ url, alt }: Props) {
       <video
         src={dataUrl}
         controls
-        className="my-2 max-w-full rounded-md border border-border/30 bg-background/30"
+        className="my-2 max-w-full rounded-md border border-hairline bg-foreground/[0.03]"
       >
         <track kind="captions" />
       </video>
