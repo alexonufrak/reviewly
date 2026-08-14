@@ -15,8 +15,8 @@ import { safeOpenUrl, toastRetry } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useLocalRepos } from "@/stores/local-repos";
 import {
-  type GroupBy,
   type CiFilter,
+  type GroupBy,
   type PrFilterGroup,
   type PrFilterSnapshot,
   type PrScope,
