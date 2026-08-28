@@ -164,6 +164,9 @@ pub struct DashboardPr {
     pub issue_comment_count: u64,
     pub review_thread_count: u64,
     pub unresolved_thread_count: u64,
+    pub head_sha: String,
+    pub base_sha: String,
+    pub has_pending_review: bool,
 }
 
 #[derive(Deserialize)]
@@ -206,6 +209,11 @@ struct StatsNode {
     comments: Option<StatsCount>,
     #[serde(rename = "reviewThreads")]
     review_threads: Option<StatsReviewThreads>,
+    #[serde(rename = "headRefOid")]
+    head_sha: Option<String>,
+    #[serde(rename = "baseRefOid")]
+    base_sha: Option<String>,
+    reviews: Option<StatsReviews>,
 }
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -257,6 +265,19 @@ struct StatsReviewThread {
     is_resolved: bool,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct StatsReviews {
+    nodes: Vec<StatsReview>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct StatsReview {
+    #[serde(rename = "viewerDidAuthor")]
+    viewer_did_author: bool,
+}
+
 fn ci_from_node(n: &StatsNode) -> &'static str {
     match n
         .commits
@@ -291,6 +312,11 @@ fn dashboard_pr_from_node(n: StatsNode, ci: &str) -> Option<DashboardPr> {
         .as_ref()
         .map(|t| t.nodes.iter().filter(|thread| !thread.is_resolved).count() as u64)
         .unwrap_or(0);
+    let has_pending_review = n
+        .reviews
+        .as_ref()
+        .map(|reviews| reviews.nodes.iter().any(|review| review.viewer_did_author))
+        .unwrap_or(false);
 
     n.database_id.map(|id| DashboardPr {
         id,
@@ -312,8 +338,13 @@ fn dashboard_pr_from_node(n: StatsNode, ci: &str) -> Option<DashboardPr> {
         issue_comment_count,
         review_thread_count,
         unresolved_thread_count,
+        head_sha: n.head_sha.unwrap_or_default(),
+        base_sha: n.base_sha.unwrap_or_default(),
+        has_pending_review,
     })
 }
+
+const DASHBOARD_PR_FIELDS: &str = "databaseId number title url isDraft reviewDecision mergeable createdAt updatedAt headRefOid baseRefOid author{ login avatarUrl } repository{ nameWithOwner } comments(first:1){ totalCount } reviewThreads(first:100){ totalCount nodes{ isResolved } } reviews(states:[PENDING],first:10){ nodes{ viewerDidAuthor } } commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } }";
 
 #[tauri::command]
 pub async fn gh_dashboard(
@@ -331,9 +362,8 @@ pub async fn gh_dashboard(
     let rr = format!("{prefix}is:pr is:open review-requested:@me archived:false -is:draft");
     let men = format!("{prefix}is:pr is:open involves:@me -author:@me archived:false");
 
-    let pr_fields = "databaseId number title url isDraft reviewDecision mergeable createdAt updatedAt author{ login avatarUrl } repository{ nameWithOwner } comments(first:1){ totalCount } reviewThreads(first:100){ totalCount nodes{ isResolved } } commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } }";
     let gql = format!(
-        "query($mine:String!,$rr:String!,$men:String!){{ mine: search(query:$mine,type:ISSUE,first:100){{ issueCount nodes{{ ... on PullRequest {{ {pr_fields} }} }} }} incoming: search(query:$rr,type:ISSUE,first:100){{ issueCount nodes{{ ... on PullRequest {{ {pr_fields} }} }} }} men: search(query:$men,type:ISSUE){{ issueCount }} }}"
+        "query($mine:String!,$rr:String!,$men:String!){{ mine: search(query:$mine,type:ISSUE,first:100){{ issueCount nodes{{ ... on PullRequest {{ {DASHBOARD_PR_FIELDS} }} }} }} incoming: search(query:$rr,type:ISSUE,first:100){{ issueCount nodes{{ ... on PullRequest {{ {DASHBOARD_PR_FIELDS} }} }} }} men: search(query:$men,type:ISSUE){{ issueCount }} }}"
     );
     let data: DashData = graphql(
         &state,
@@ -457,4 +487,39 @@ pub async fn gh_list_repos_open_prs(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ci_from_node, dashboard_pr_from_node, StatsNode, DASHBOARD_PR_FIELDS};
+
+    #[test]
+    fn dashboard_projection_preserves_shas_and_authored_pending_review() {
+        let node: StatsNode = serde_json::from_value(serde_json::json!({
+            "databaseId": 42,
+            "number": 7,
+            "title": "Queue safely",
+            "url": "https://github.com/acme/api/pull/7",
+            "headRefOid": "head-sha",
+            "baseRefOid": "base-sha",
+            "author": { "login": "sam", "avatarUrl": "https://example.com/sam.png" },
+            "repository": { "nameWithOwner": "acme/api" },
+            "reviews": { "nodes": [{ "viewerDidAuthor": true }] }
+        }))
+        .expect("dashboard fixture should deserialize");
+        let ci = ci_from_node(&node);
+        let pr = dashboard_pr_from_node(node, ci).expect("database id should create a PR");
+
+        assert_eq!(pr.head_sha, "head-sha");
+        assert_eq!(pr.base_sha, "base-sha");
+        assert!(pr.has_pending_review);
+    }
+
+    #[test]
+    fn shared_dashboard_selection_contains_candidate_fields() {
+        assert!(DASHBOARD_PR_FIELDS.contains("headRefOid"));
+        assert!(DASHBOARD_PR_FIELDS.contains("baseRefOid"));
+        assert!(DASHBOARD_PR_FIELDS.contains("reviews(states:[PENDING]"));
+        assert!(DASHBOARD_PR_FIELDS.contains("viewerDidAuthor"));
+    }
 }

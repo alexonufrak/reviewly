@@ -75,6 +75,9 @@ export interface DashboardPr {
   issueCommentCount: number;
   reviewThreadCount: number;
   unresolvedThreadCount: number;
+  headSha: string;
+  baseSha: string;
+  hasPendingReview: boolean;
 }
 
 export type MinePr = DashboardPr;

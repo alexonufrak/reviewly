@@ -5,9 +5,17 @@ import { PopoverItem, PopoverPanel, PopoverSection } from "@/components/popover"
 import { TooltipFor } from "@/components/tooltip-for";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  type InboxItem,
+  type Priority,
+  ageDays,
+  byPriorityThenAge,
+  fromPr,
+  shortAge,
+} from "@/lib/dashboard";
 import { relativeTime } from "@/lib/format";
 import { ciMeta, reviewMeta } from "@/lib/status";
-import type { Dashboard, DashboardPr } from "@/lib/tauri";
+import type { Dashboard } from "@/lib/tauri";
 import { invoke } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/stores/auth";
@@ -32,89 +40,6 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-
-const DAY = 86_400_000;
-
-type Priority = "critical" | "high" | "normal" | "low";
-
-interface InboxItem extends DashboardPr {
-  owner: string;
-  repoName: string;
-  priority: Priority;
-  waitingDays: number;
-  blocked: boolean;
-}
-
-function fromPr(m: DashboardPr): InboxItem {
-  const [owner, repo] = m.repo.split("/");
-  const waitingDays = ageDays(m.updatedAt ?? m.createdAt);
-  const blocked = isBlocked(m);
-  return {
-    ...m,
-    owner: owner ?? "",
-    repoName: repo ?? "",
-    priority: priorityFor(m, waitingDays, blocked),
-    waitingDays,
-    blocked,
-  };
-}
-
-function ageDays(iso?: string | null): number {
-  if (!iso) return 0;
-  return Math.max(0, Math.floor((Date.now() - +new Date(iso)) / DAY));
-}
-
-function shortAge(iso?: string | null): { label: string; aging: boolean } {
-  if (!iso) return { label: "", aging: false };
-  const ms = Date.now() - +new Date(iso);
-  const d = Math.floor(ms / DAY);
-  if (d >= 1) return { label: `${d}d`, aging: d > 7 };
-  const h = Math.floor(ms / 3_600_000);
-  if (h >= 1) return { label: `${h}h`, aging: false };
-  return { label: "now", aging: false };
-}
-
-function isBlocked(pr: DashboardPr): boolean {
-  return (
-    pr.ci === "failure" ||
-    pr.conflicting ||
-    pr.reviewDecision === "CHANGES_REQUESTED" ||
-    pr.unresolvedThreadCount > 0
-  );
-}
-
-function priorityFor(
-  pr: DashboardPr,
-  waitingDays = ageDays(pr.updatedAt ?? pr.createdAt),
-  blocked = isBlocked(pr),
-): Priority {
-  if (waitingDays > 7 || (blocked && waitingDays > 3)) return "critical";
-  if (
-    pr.ci === "failure" ||
-    pr.conflicting ||
-    pr.reviewDecision === "CHANGES_REQUESTED" ||
-    pr.unresolvedThreadCount > 0 ||
-    (waitingDays >= 4 && waitingDays <= 7)
-  ) {
-    return "high";
-  }
-  if ((waitingDays >= 1 && waitingDays <= 3) || pr.ci === "pending") return "normal";
-  return "low";
-}
-
-const PRIORITY_WEIGHT: Record<Priority, number> = {
-  critical: 0,
-  high: 1,
-  normal: 2,
-  low: 3,
-};
-
-function byPriorityThenAge(a: InboxItem, b: InboxItem): number {
-  return (
-    PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority] ||
-    +new Date(a.updatedAt ?? a.createdAt ?? 0) - +new Date(b.updatedAt ?? b.createdAt ?? 0)
-  );
-}
 
 export function DashboardPage() {
   const viewer = useAuth((s) => s.viewer);
