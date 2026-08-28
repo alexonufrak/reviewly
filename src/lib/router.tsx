@@ -1,5 +1,6 @@
 import { AppLayout, ChatWindowLayout } from "@/app/layout";
 import { CrashFallback } from "@/components/error-boundary";
+import { validatePrFocusSearch } from "@/lib/auto-review/navigation";
 import { DashboardPage } from "@/routes/dashboard";
 import {
   Outlet,
@@ -59,6 +60,7 @@ const prsRoute = createRoute({
 const prDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/prs/$owner/$repo/$number",
+  validateSearch: validatePrFocusSearch,
   component: lazyRouteComponent(() => import("@/routes/pr-detail"), "PRDetailPage"),
 });
 

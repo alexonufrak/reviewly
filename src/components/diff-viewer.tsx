@@ -48,6 +48,8 @@ interface Props {
   density?: "comfortable" | "compact";
   /** New-file line to scroll to + flash (e.g. when a guided-tour step opens). */
   focusLine?: number | null;
+  /** Diff side for the focused line. Guided-tour calls default to RIGHT. */
+  focusSide?: Side;
   /** Bumps on every focus request so repeat clicks re-trigger the scroll/flash. */
   focusNonce?: number;
   /** PR head sha — enables GitHub permalinks for the file/line copy actions. */
@@ -125,6 +127,7 @@ export function DiffViewer({
   onReachedEnd,
   density = "comfortable",
   focusLine,
+  focusSide = "RIGHT",
   focusNonce,
   headSha,
   viewedKey,
@@ -160,7 +163,9 @@ export function DiffViewer({
     let timer: ReturnType<typeof setTimeout> | null = null;
     // Defer to next frame so a just-switched file has rendered its rows.
     raf = requestAnimationFrame(() => {
-      const el = root.querySelector<HTMLElement>(`[data-line="${focusLine}"]`);
+      const el = root.querySelector<HTMLElement>(
+        `[data-line="${focusLine}"][data-side="${focusSide}"]`,
+      );
       if (!el) return;
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.remove("diff-line-flash");
@@ -173,7 +178,7 @@ export function DiffViewer({
       cancelAnimationFrame(raf);
       if (timer) clearTimeout(timer);
     };
-  }, [focusLine, focusNonce, path]);
+  }, [focusLine, focusNonce, focusSide, path]);
 
   // Which gaps (between/around hunks) the user has expanded. Reset per file,
   // then re-seeded from any persisted expansions for this file.
@@ -1027,7 +1032,8 @@ function RowUnified({
   return (
     <>
       <div
-        data-line={line.newLine ?? undefined}
+        data-line={lineNum ?? undefined}
+        data-side={side}
         // Keyboard-focusable so a comment can be placed without the mouse:
         // Enter (or space) opens the comment popover for this line.
         tabIndex={canComment ? 0 : undefined}
@@ -1232,7 +1238,8 @@ function Half({
   return (
     <div className="min-w-0">
       <div
-        data-line={side === "RIGHT" ? (line.newLine ?? undefined) : undefined}
+        data-line={lineNum ?? undefined}
+        data-side={side}
         tabIndex={canComment ? 0 : undefined}
         role={canComment ? "button" : undefined}
         aria-label={canComment ? `Line ${lineNum} — press Enter to comment` : undefined}

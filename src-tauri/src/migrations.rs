@@ -217,6 +217,12 @@ pub fn migrations() -> Vec<Migration> {
         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "track viewed automated review results",
+            sql: "ALTER TABLE auto_review_runs ADD COLUMN viewed_at INTEGER;",
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -235,7 +241,7 @@ mod tests {
             .into_iter()
             .map(|migration| migration.version)
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[tokio::test]
@@ -278,6 +284,15 @@ mod tests {
         .collect();
         assert!(indexes.contains(&"auto_review_runs_repo_pr_head".to_string()));
         assert!(indexes.contains(&"auto_review_findings_run_ordinal".to_string()));
+
+        let columns: Vec<String> = sqlx::query("PRAGMA table_info(auto_review_runs)")
+            .fetch_all(&mut connection)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.get("name"))
+            .collect();
+        assert!(columns.contains(&"viewed_at".to_string()));
 
         let foreign_keys = sqlx::query("PRAGMA foreign_key_list(auto_review_findings)")
             .fetch_all(&mut connection)

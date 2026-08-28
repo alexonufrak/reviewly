@@ -28,6 +28,7 @@ import {
   Hash,
   Info,
   LayoutDashboard,
+  ListChecks,
   RefreshCw,
   Settings,
 } from "lucide-react";
@@ -221,6 +222,10 @@ export function CommandPalette() {
           <CommandItem onSelect={() => go("/dependabot")}>
             <Bot /> <span>Dependabot</span>
             <CommandShortcut>⌘5</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={() => go("/review-inbox")}>
+            <ListChecks /> <span>Review inbox</span>
+            <CommandShortcut>⌘6</CommandShortcut>
           </CommandItem>
           <CommandItem
             onSelect={() => {

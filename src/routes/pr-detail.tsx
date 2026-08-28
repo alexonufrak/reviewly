@@ -40,6 +40,8 @@ import { UserAvatar } from "@/components/user-avatar";
 import { UserHoverCard } from "@/components/user-hover-card";
 import type { AiAction } from "@/lib/ai-actions";
 import { buildReviewContext } from "@/lib/ai/context";
+import { resolvePrFocus } from "@/lib/auto-review/navigation";
+import type { AutoReviewSide } from "@/lib/auto-review/types";
 import { parsePatch } from "@/lib/diff";
 import { relativeTime } from "@/lib/format";
 import { celebrate } from "@/lib/kite-release";
@@ -71,7 +73,7 @@ import { useReviewPrefs } from "@/stores/review-prefs";
 import { useUi } from "@/stores/ui";
 import { useViewedFiles, viewedKey } from "@/stores/viewed-files";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useBlocker, useNavigate, useParams } from "@tanstack/react-router";
+import { useBlocker, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import {
   ArrowRight,
   Check,
@@ -164,6 +166,7 @@ function mergeReview(
 
 export function PRDetailPage() {
   const { owner, repo, number: numberStr } = useParams({ from: "/prs/$owner/$repo/$number" });
+  const focusSearch = useSearch({ from: "/prs/$owner/$repo/$number" });
   const number = Number(numberStr);
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -202,6 +205,7 @@ export function PRDetailPage() {
   // Guided-tour "jump to line": which new-file line to scroll to + flash, with
   // a nonce so clicking the same step twice re-triggers the scroll.
   const [focusLine, setFocusLine] = useState<number | null>(null);
+  const [focusSide, setFocusSide] = useState<AutoReviewSide>("RIGHT");
   const [focusNonce, setFocusNonce] = useState(0);
   const [editingTitle, setEditingTitle] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -213,6 +217,7 @@ export function PRDetailPage() {
     setActiveFile(c.path);
     if (c.line != null) {
       setFocusLine(c.line);
+      setFocusSide("RIGHT");
       setFocusNonce((n) => n + 1);
     }
     setView("unified");
@@ -429,6 +434,41 @@ export function PRDetailPage() {
           : "text-muted-foreground";
   const fileList = files.data ?? [];
   const filteredThreads = threads.data ?? [];
+
+  // Consume a review-inbox exact-line anchor after the files arrive. The URL
+  // is replaced once consumed so refreshing the PR does not jump again.
+  useEffect(() => {
+    if (!focusSearch.file || fileList.length === 0) return;
+    const target = resolvePrFocus(
+      focusSearch,
+      fileList.map((file) => file.filename),
+    );
+    if (target) {
+      setTabState(target.tab);
+      setPersistedTab(prViewKey, target.tab);
+      setActiveFile(target.activeFile);
+      setView(target.view);
+      setFocusLine(target.focusLine);
+      setFocusSide(target.focusSide);
+      setFocusNonce((value) => value + 1);
+    }
+    void navigate({
+      to: "/prs/$owner/$repo/$number",
+      params: { owner, repo, number: numberStr },
+      search: {},
+      replace: true,
+    });
+  }, [
+    fileList,
+    focusSearch,
+    navigate,
+    numberStr,
+    owner,
+    prViewKey,
+    repo,
+    setPersistedTab,
+    setView,
+  ]);
 
   // Viewed-files state, also used to drive "mark viewed & next".
   const vk = headSha ? viewedKey(owner, repo, number, headSha) : null;
@@ -1251,6 +1291,7 @@ export function PRDetailPage() {
               setActiveFile(path);
               if (line != null) {
                 setFocusLine(line);
+                setFocusSide("RIGHT");
                 setFocusNonce((n) => n + 1);
               }
               setView("unified");
@@ -1341,6 +1382,7 @@ export function PRDetailPage() {
                       }}
                       density={diffDensity}
                       focusLine={focusLine}
+                      focusSide={focusSide}
                       focusNonce={focusNonce}
                       headSha={headSha}
                       viewedKey={vk}

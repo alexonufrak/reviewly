@@ -14,6 +14,7 @@ import {
   type CodexReasoningEffort,
   collectAutoReviewRepos,
 } from "@/lib/auto-review/config";
+import { AUTO_REVIEW_WAKE_EVENT } from "@/lib/auto-review/coordinator";
 import { autoReviewDb } from "@/lib/auto-review/db";
 import type { AutoReviewRepoSetting } from "@/lib/auto-review/types";
 import type { Dashboard } from "@/lib/tauri";
@@ -90,7 +91,10 @@ export function AutomaticReviewSettingsSection() {
       queryClient.setQueryData(SETTINGS_QUERY_KEY, context?.previous);
       toast.error("Could not save automatic review settings");
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+      window.dispatchEvent(new CustomEvent(AUTO_REVIEW_WAKE_EVENT, { detail: "reconnect" }));
+    },
   });
 
   function update(repo: string, patch: Partial<AutoReviewRepoSetting>) {

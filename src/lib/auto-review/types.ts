@@ -77,6 +77,7 @@ export interface AutoReviewRun {
   notificationKind: string | null;
   notificationDueAt: number | null;
   notifiedAt: number | null;
+  viewedAt: number | null;
 }
 
 export interface AutoReviewRepoSetting {

@@ -55,6 +55,7 @@ export interface AutoReviewDb {
   recoverStaleRuns(activeKeys: Set<string>): Promise<void>;
   listDueNotifications(now: number): Promise<AutoReviewRun[]>;
   markNotificationDelivered(id: string, deliveredAt: number): Promise<void>;
+  markRunViewed(id: string, viewedAt: number): Promise<void>;
   getRunDetail(id: string): Promise<{ run: AutoReviewRun; findings: AutoReviewFinding[] } | null>;
   deleteRun(id: string): Promise<{ jsonPath: string | null; markdownPath: string | null }>;
 }
@@ -92,6 +93,7 @@ interface RunRow {
   notification_kind: string | null;
   notification_due_at: number | null;
   notified_at: number | null;
+  viewed_at: number | null;
 }
 
 interface FindingRow {
@@ -152,6 +154,7 @@ function toRun(row: RunRow): AutoReviewRun {
     notificationKind: row.notification_kind,
     notificationDueAt: row.notification_due_at,
     notifiedAt: row.notified_at,
+    viewedAt: row.viewed_at,
   };
 }
 
@@ -417,6 +420,15 @@ export function createAutoReviewDb(
       await client.execute(
         "UPDATE auto_review_runs SET notified_at = $1 WHERE id = $2 AND notified_at IS NULL",
         [deliveredAt, id],
+      );
+    },
+    async markRunViewed(id, viewedAt) {
+      const client = await loadClient();
+      await client.execute(
+        `UPDATE auto_review_runs
+         SET viewed_at = $1
+         WHERE id = $2 AND status = 'completed' AND viewed_at IS NULL`,
+        [viewedAt, id],
       );
     },
     async getRunDetail(id) {

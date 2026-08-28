@@ -105,8 +105,14 @@ export function useAutoReview() {
         }),
     };
     const coordinator = createAutoReviewCoordinator({ db: autoReviewDb, services });
+    const refreshRuns = () => queryClient.invalidateQueries({ queryKey: ["auto-review"] });
     const wake = (trigger: AutoReviewTrigger) => {
-      if (!disposed) void coordinator.reconcile(trigger).catch(() => {});
+      if (!disposed) {
+        void coordinator
+          .reconcile(trigger)
+          .catch(() => {})
+          .finally(refreshRuns);
+      }
     };
     const onCoordinatorWake = (event: Event) => {
       const trigger = (event as CustomEvent<AutoReviewTrigger>).detail;
@@ -122,14 +128,19 @@ export function useAutoReview() {
     void (async () => {
       try {
         const unsubscribe = await subscribe<AiDone>("ai:done", (event) => {
-          if (!disposed) void coordinator.handleAiDone(event.payload).catch(() => {});
+          if (!disposed) {
+            void coordinator
+              .handleAiDone(event.payload)
+              .catch(() => {})
+              .finally(refreshRuns);
+          }
         });
         if (disposed) {
           unsubscribe();
           return;
         }
         unsubscribeAi = unsubscribe;
-        await coordinator.start();
+        await coordinator.start().finally(refreshRuns);
       } catch {
         // Authentication and GitHub connectivity wakes will try reconciliation again.
       }

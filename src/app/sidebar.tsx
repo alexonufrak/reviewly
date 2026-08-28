@@ -1,5 +1,6 @@
 import { ReviewlyGlyph } from "@/components/reviewly-glyph";
 import { TooltipFor } from "@/components/tooltip-for";
+import { autoReviewDb } from "@/lib/auto-review/db";
 import type { DependabotAlert, Notification } from "@/lib/tauri";
 import { invoke } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -7,7 +8,15 @@ import { useDependabotRepo } from "@/stores/dependabot";
 import { useUi } from "@/stores/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Bell, Bot, FolderGit2, GitPullRequest, type LucideIcon, Settings } from "lucide-react";
+import {
+  Bell,
+  Bot,
+  FolderGit2,
+  GitPullRequest,
+  ListChecks,
+  type LucideIcon,
+  Settings,
+} from "lucide-react";
 
 type NavItem = {
   to: string;
@@ -18,6 +27,7 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { to: "/prs", label: "Pull requests", icon: GitPullRequest, shortcut: "⌘2" },
+  { to: "/review-inbox", label: "Review inbox", icon: ListChecks, shortcut: "⌘6" },
   { to: "/repos", label: "Repositories", icon: FolderGit2, shortcut: "⌘3" },
   { to: "/notifications", label: "Notifications", icon: Bell, shortcut: "⌘4" },
   { to: "/dependabot", label: "Dependabot", icon: Bot, shortcut: "⌘5" },
@@ -50,6 +60,23 @@ export function Sidebar() {
   // A real "0 to review" is a clean rail; loading/error must NOT masquerade as 0.
   const reviewPending = reviewQueue.isLoading || reviewQueue.isError;
 
+  // Local durable work only. This badge reuses the automatic-review SQLite
+  // queue instead of issuing another GitHub request.
+  const automaticReviews = useQuery({
+    queryKey: ["auto-review", "runs"],
+    queryFn: () => autoReviewDb.listRuns(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const automaticReviewCount = (automaticReviews.data ?? []).filter(
+    (run) =>
+      ["queued", "running", "failed"].includes(run.status) ||
+      (run.status === "completed" && run.viewedAt === null),
+  ).length;
+  const automaticReviewFailed = (automaticReviews.data ?? []).some(
+    (run) => run.status === "failed",
+  );
+
   // Open Dependabot alerts for the tracked repo → an amber (alert-toned) count on
   // the Dependabot rail. Per-repo endpoint, so it follows the selected repo; quiet
   // (no badge) when none is set or the call lacks security access.
@@ -66,7 +93,13 @@ export function Sidebar() {
   const dependabotCount = (dependabotAlerts.data ?? []).filter((a) => a.state === "open").length;
 
   const badgeFor = (to: string): number =>
-    to === "/notifications" ? unread : to === "/dependabot" ? dependabotCount : 0;
+    to === "/notifications"
+      ? unread
+      : to === "/dependabot"
+        ? dependabotCount
+        : to === "/review-inbox"
+          ? automaticReviewCount
+          : 0;
 
   return (
     <aside className="flex h-full w-14 shrink-0 flex-col items-center bg-sidebar/40 py-2">
@@ -90,16 +123,28 @@ export function Sidebar() {
             active={isActive(item.to, location.pathname)}
             badge={item.to === "/prs" ? toReview : badgeFor(item.to)}
             // Dependabot is a security alert → amber, not the primary accent.
-            badgeTone={item.to === "/dependabot" ? "warning" : "primary"}
+            badgeTone={
+              item.to === "/dependabot" || (item.to === "/review-inbox" && automaticReviewFailed)
+                ? "warning"
+                : "primary"
+            }
             // While the review-queue count is loading or errored, show a neutral
             // dot instead of "0" so a genuine empty queue reads differently.
-            pending={item.to === "/prs" && reviewPending}
+            pending={
+              (item.to === "/prs" && reviewPending) ||
+              (item.to === "/review-inbox" &&
+                (automaticReviews.isLoading || automaticReviews.isError))
+            }
             pendingLabel={
               item.to === "/prs"
                 ? reviewQueue.isError
                   ? "Review queue count unavailable"
                   : "Loading review queue…"
-                : undefined
+                : item.to === "/review-inbox"
+                  ? automaticReviews.isError
+                    ? "Automatic review count unavailable"
+                    : "Loading automatic reviews…"
+                  : undefined
             }
           />
         ))}

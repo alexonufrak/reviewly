@@ -83,6 +83,7 @@ function queuedRun(
     notificationKind: null,
     notificationDueAt: null,
     notifiedAt: null,
+    viewedAt: null,
   };
 }
 
@@ -237,6 +238,11 @@ class MemoryAutoReviewDb implements AutoReviewDb {
   }
 
   async markNotificationDelivered() {}
+
+  async markRunViewed(id: string, viewedAt: number) {
+    const run = this.runs.find((item) => item.id === id && item.status === "completed");
+    if (run && run.viewedAt === null) run.viewedAt = viewedAt;
+  }
 
   async getRunDetail(id: string) {
     const run = this.runs.find((item) => item.id === id);

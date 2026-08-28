@@ -45,6 +45,7 @@ CREATE TABLE auto_review_runs (
   notification_kind TEXT,
   notification_due_at INTEGER,
   notified_at INTEGER,
+  viewed_at INTEGER,
   UNIQUE(repo, pr_number, head_sha)
 );
 CREATE TABLE auto_review_findings (
@@ -353,5 +354,27 @@ describe("automated review persistence", () => {
     await repository.markNotificationDelivered(run?.id as string, 2_100);
 
     expect(await repository.listDueNotifications(3_000)).toEqual([]);
+  });
+
+  test("marks a completed result viewed only once", async () => {
+    const { repository } = setup();
+    const run = await repository.enqueueCandidate(candidate(), "assignment");
+    expect(run).not.toBeNull();
+    await repository.completeRun({
+      id: run?.id as string,
+      contextMode: "diff_only",
+      conclusion: "no_concerns",
+      overallComment: null,
+      toneSampleHash: null,
+      completedAt: 2_000,
+      findings: [],
+      exportError: null,
+    });
+
+    expect((await repository.getRunDetail(run?.id as string))?.run.viewedAt).toBeNull();
+    await repository.markRunViewed(run?.id as string, 3_000);
+    await repository.markRunViewed(run?.id as string, 4_000);
+
+    expect((await repository.getRunDetail(run?.id as string))?.run.viewedAt).toBe(3_000);
   });
 });
