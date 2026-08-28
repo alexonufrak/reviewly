@@ -16,6 +16,7 @@ The automated path never posts to GitHub. Reviewly's existing manual review cont
 - Detect open, non-draft pull requests with `review-requested:@me` through the existing 60-second poller.
 - Run a preliminary Codex review automatically for each enabled repository.
 - Review every newly observed head SHA exactly once, including force-pushes and follow-up commits.
+- Skip analysis when the signed-in user already has a `PENDING` GitHub review on the PR, avoiding a competing draft.
 - Use an isolated temporary worktree when a matching local clone is configured.
 - Fall back to a clearly labeled diff-only review when no local clone is available.
 - Produce concise, paste-ready comments with exact file and line placement.
@@ -48,12 +49,13 @@ The automated path never posts to GitHub. Reviewly's existing manual review cont
 ### New review request
 
 1. Reviewly's existing poller detects a new PR in `review-requested:@me`.
-2. The coordinator reconciles the pending-review set and reads the current head SHA.
-3. If automatic review is enabled and no run exists for that repository, PR number, and head SHA, it creates a queued run.
-4. If a mapped clone is available, Reviewly fetches the PR head and creates a detached temporary worktree without switching or modifying the user's working branch.
-5. Codex runs in the worktree with read-only sandboxing. The prompt includes PR metadata, the current diff, relevant conversation, the tone profile, and the required output schema.
-6. Reviewly validates the response, rechecks the live head SHA, stores the run and findings, writes Markdown and JSON artifacts, and removes the temporary worktree.
-7. A native notification appears for every completed review. Selecting the PR in the app opens the prepared review.
+2. The coordinator reconciles through the shared incoming-review GraphQL projection, which supplies the base SHA, head SHA, and whether the signed-in user already has a pending review.
+3. If an authored `PENDING` review exists, the queue shows `existing draft` from live GitHub state and Reviewly does not inspect the diff, create a run, or start Codex.
+4. If automatic review is enabled and no run exists for that repository, PR number, and head SHA, it creates a queued run.
+5. If a mapped clone is available, Reviewly fetches the PR head and creates a detached temporary worktree without switching or modifying the user's working branch.
+6. Codex runs in the worktree with read-only sandboxing. The prompt includes PR metadata, the current diff, relevant conversation, the tone profile, and the required output schema.
+7. Reviewly validates the response, rechecks the live head SHA, stores the run and findings, writes Markdown and JSON artifacts, and removes the temporary worktree.
+8. A native notification appears for every completed review. Selecting the PR in the app opens the prepared review.
 
 ### Updated PR head
 
@@ -92,13 +94,16 @@ Add a dedicated review-inbox route while retaining Reviewly's existing sidebar a
 2. A queue of assigned PRs and recent review runs.
 3. The selected prepared review.
 
+The queue reuses the dashboard's `DashboardPr` incoming-review projection and extracts the existing inbox row/view-model behavior into a shared component. It must not introduce a second source of PR assignment truth or duplicate the dashboard's repository, author, age, CI, and review-state formatting.
+
 The visual treatment should stay close to a quiet native macOS app:
 
 - Keep the existing macOS vibrancy at the window level.
 - Use opaque reading surfaces for comments and evidence.
 - Use restrained status color and comfortable information density.
 - Avoid decorative dashboards or oversized summary cards.
-- Preserve keyboard navigation and resizable panels already used elsewhere in Reviewly.
+- Compose the existing `PageHeader`, `ScrollArea`, resizable panels, empty state, tooltip, icon-button, and PR-row styling primitives.
+- Preserve keyboard navigation already used elsewhere in Reviewly.
 
 Each queue row shows repository, PR number, title, author, current head status, context mode, and run state. Completed rows distinguish `findings`, `no concerns`, and `limited context` without turning the list into a severity dashboard.
 
@@ -113,7 +118,7 @@ The paste-ready comment is the primary content. Supporting evidence appears belo
 - Category and confidence as quiet secondary metadata.
 - A short evidence snippet when it materially helps the user verify the comment.
 
-The Open action navigates to Reviewly's current PR diff at the selected line. A GitHub link is also stored for the exact head or base line when a stable line link can be constructed.
+The Open action navigates to Reviewly's current PR detail route with `file`, `line`, and `side` search parameters. `PRDetailPage` consumes those parameters through its existing `activeFile`, `focusLine`, and diff-viewer focus behavior. The cockpit does not implement a second diff viewer. A GitHub link is also stored for the exact head or base line when a stable line link can be constructed.
 
 ### Existing manual submission
 
@@ -131,7 +136,7 @@ This gives the user the current Reviewly workflow when they decide to post:
 
 ### Fixed rules
 
-These rules are part of the application prompt and validator. Automatically learned style and user edits cannot override them.
+These rules are part of the application prompt. The machine-checkable subset is also enforced by the validator. Automatically learned style and user edits cannot override them.
 
 - Sound like a supportive engineer while remaining direct.
 - Lead with the question, concern, or requested verification.
@@ -189,11 +194,18 @@ flowchart LR
 
 - `src-tauri/src/workers/github_poll.rs` remains the only periodic GitHub poller.
 - `src/app/use-realtime-events.ts` remains the bridge from poller events into the WebView.
-- `src-tauri/src/commands/ai.rs` remains the provider process bridge. Automated review uses its Codex path and read-only sandbox.
+- The incoming portion of `gh_dashboard` remains the source for requested-review metadata. Its shared GraphQL projection is extended with base SHA, head SHA, and authored-pending-review state instead of adding per-PR detail requests.
+- `src-tauri/src/commands/ai.rs` remains the provider process bridge. Automated review uses `ai_review_bg`, `ai_inflight`, `ai_tasks`, and `ai:done` with the existing Codex path and read-only sandbox.
+- `src/lib/ai/json.ts` remains the shared model-output JSON utility. Automated review uses its fence stripping and safe primitive coercion while keeping the final finding contract strict.
+- `src/stores/ai.ts` remains the source for app-level Codex model and timeout configuration and is extended with reasoning effort. A provider-specific resolver reads Codex settings for automation without changing the provider selected for manual AI features.
+- `src/stores/review-prefs.ts` remains the source for user-authored AI review instructions. Those instructions are included before the automated-review fixed rules.
 - `src/stores/local-repos.ts` remains the source for repository-to-clone mappings.
+- `src-tauri/src/commands/git.rs` remains the system Git execution boundary. Its existing process, timeout, repository-inspection, and worktree primitives are extended or extracted for temporary review worktrees.
 - `src-tauri/src/lib.rs` remains the centralized SQLite migration registry.
 - `src/lib/sql-storage.ts` and the existing `reviewly.db` remain the settings and application database.
-- `tauri-plugin-notification`, `tauri-plugin-autostart`, the tray worker, close-to-tray behavior, router, sidebar, diff viewer, and review composer remain in place.
+- `src/stores/notif-settings.ts`, `src/app/use-notif-sync.ts`, and the notification fields in `AppState` remain the single notification preference and delivery configuration path.
+- `src/stores/app-behavior.ts`, `tauri-plugin-autostart`, the tray worker, and close-to-tray behavior remain the application-lifecycle path.
+- The router, sidebar, dashboard incoming rows, PR detail focus state, diff viewer, and review composer remain in place and are composed by the new cockpit.
 
 ### New modules
 
@@ -203,11 +215,22 @@ Keep new behavior isolated so upstream merges remain understandable:
 - `src/app/use-auto-review.ts`: the single app-wide coordinator hook.
 - `src/components/auto-review/`: queue, run detail, finding card, empty, limited-context, and failure states.
 - `src/routes/review-inbox.tsx`: the cockpit route.
-- `src/stores/auto-review.ts`: global preferences persisted through existing SQL-backed Zustand storage.
-- `src-tauri/src/commands/auto_review.rs`: worktree preparation and cleanup, atomic artifact writes, and any filesystem operations that should not live in the WebView.
-- `src-tauri/src/clients/github.rs`: read-only queries needed for tone samples or current-head verification when an existing endpoint cannot provide them.
+- `src/stores/auto-review.ts`: automation-only preferences, such as artifact-root and tone-refresh controls, persisted through existing SQL-backed Zustand storage. It must not duplicate AI, notification, application-behavior, review-instruction, or local-repository settings.
+- `src-tauri/src/commands/auto_review.rs`: atomic artifact write, retry, and delete operations with application-data path containment. It does not duplicate AI, Git, notification, or queue orchestration.
+- `src-tauri/src/clients/github.rs`: shared read-only projections needed for tone samples or current-head verification when an existing endpoint cannot provide them. No second GitHub client or retry stack is introduced.
 
-Changes to existing files should be limited to route registration, sidebar navigation, settings controls, migrations, command registration, and the app-wide hook mount.
+Changes to existing files should be limited to shared-query fields, background-task key routing, shared Git helpers, route registration, sidebar navigation, settings controls, migrations, command registration, and the app-wide hook mount.
+
+### Existing settings ownership
+
+Configuration stays with the current owner instead of being copied into an automated-review store:
+
+- App-level Codex model and timeout remain in `useAiProvider`; reasoning effort is added beside them. Automated review resolves the Codex entry explicitly and overlays repository overrides without changing the provider used by guided review or chat.
+- Custom engineering guidance remains in `useReviewPrefs.aiInstructions`.
+- Desktop notification enablement, reasons, polling cadence, and quiet hours remain in `useNotifSettings` and continue syncing through `useNotifSync`.
+- Launch-at-login, start-in-tray, confirmation, and the new review-inbox landing option remain in `useAppBehavior`.
+- Clone mappings remain in `useLocalRepos`.
+- Per-repository automatic-review enablement and model/reasoning overrides remain in the relational `auto_review_repo_settings` table because they must participate in queue reconciliation and querying.
 
 ## Execution model
 
@@ -223,9 +246,13 @@ The coordinator wakes on:
 - A low-frequency reconciliation timer as a safety net.
 - Manual Retry.
 
+Each wake reconciles against one shared incoming-review GraphQL projection for all enabled repositories. That projection includes the candidate identity, base SHA, head SHA, and authored-pending-review state. The coordinator must not fetch `gh_get_pull` once per candidate merely to learn those fields.
+
 V1 executes one automated review at a time. This keeps local CPU use predictable, avoids multiple Codex processes competing for context, and simplifies recovery. The database uniqueness constraint makes all wake sources idempotent.
 
-Before spawning Codex, the coordinator persists the run as running. Completion is accepted only for the matching run ID and head SHA. If the WebView reloads, the coordinator checks Reviewly's current AI inflight registry and recovers stale running rows. A result event whose run is no longer current is ignored or marked superseded rather than attached to a newer head.
+Before adding the automated-review consumer, Reviewly defines explicit background AI task keys for guided, layered, and automated work. Automated runs use `auto-review:<run-id>`. Event listeners classify keys before parsing so one AI surface can never interpret another surface's output. The common completion payload and actionable error-hint formatting are shared instead of copied into a third listener.
+
+Before spawning Codex through the existing `ai_review_bg` command, the coordinator persists the run as running. Completion is accepted only for the matching run ID and head SHA. If the WebView reloads, the coordinator checks Reviewly's current AI inflight registry and recovers stale running rows. A result event whose run is no longer current is ignored or marked superseded rather than attached to a newer head.
 
 ## Local context
 
@@ -241,6 +268,8 @@ When `src/stores/local-repos.ts` contains a valid clone mapping for the PR repos
 6. Remove the worktree and temporary ref in a finally-style cleanup path.
 
 The user's active branch, index, untracked files, and existing worktrees are never changed.
+
+Worktree preparation and cleanup extend the existing Git command boundary. They reuse its executable discovery, argument-based process spawning, timeout handling, repository inspection, and worktree parsing. Automated-review code must not add another shell wrapper or interpolate Git commands through a shell string.
 
 ### Diff-only mode
 
@@ -271,14 +300,14 @@ Codex returns one JSON object with this semantic shape:
 }
 ```
 
-The parser accepts only this contract. Markdown fences around the JSON may be stripped, but prose mixed with the result is invalid. A malformed response receives one repair pass with the original output and schema, then fails visibly.
+The parser accepts only this contract. It reuses `stripFence`, `tryJson`, `toInt`, and other safe primitives from `src/lib/ai/json.ts`, but it does not salvage a partial findings array from truncated output. Markdown fences around the JSON may be stripped, but prose mixed with the result is invalid. A malformed response receives one repair pass with the original output and schema, then fails visibly.
 
 ## Finding validation
 
 A finding is stored only when all applicable checks pass:
 
 - Path exists in the current PR diff.
-- Line and side map to a commentable line in a parsed diff hunk.
+- Line and side map to a commentable line using the existing `parsePatch` hunk representation.
 - The line range is ordered and tight.
 - Comment is non-empty and does not contain forbidden markup or an em dash.
 - Comment does not claim access beyond the run's context mode.
@@ -375,7 +404,7 @@ Allowed run states are `queued`, `running`, `completed`, `failed`, and `supersed
 - `refreshed_at INTEGER`
 - `last_error TEXT`
 
-Global preferences such as model, reasoning effort, quiet notification hours, artifact root, and reconciliation cadence remain in the existing SQL-backed Zustand settings pattern.
+Global settings continue through their existing SQL-backed Zustand owners. `useAiProvider` owns the app-level Codex model, reasoning effort, and timeout. `useNotifSettings` owns notification enablement and quiet hours. `useAppBehavior` owns launch and landing behavior. `useReviewPrefs` owns custom engineering instructions. The automation-specific store contains only artifact and tone-refresh preferences.
 
 ## Artifacts
 
@@ -399,14 +428,14 @@ Deleting a run from the app deletes its findings and exported files after explic
 
 ## Notifications and quiet hours
 
-Use Reviewly's existing native notification plugin. Send an alert for:
+Extend Reviewly's existing notification settings, `useNotifSync` bridge, Rust `AppState`, and native notification plugin. Add local completion and failure reasons beside the existing GitHub reasons instead of creating an automated-review notification settings stack. Send an alert for:
 
 - Completed with findings.
 - Completed with no concerns.
 - Completed with limited context.
 - Failed after retries, with a Retry affordance in the app.
 
-Do not notify for unchanged polling cycles, queued runs, ordinary retries, or superseded results. Quiet hours delay the alert, not the review run. Pending alerts are delivered when quiet hours end, with duplicate suppression by run ID.
+Do not notify for unchanged polling cycles, queued runs, ordinary retries, or superseded results. Quiet hours in the existing notification store delay the alert, not the review run. Pending alerts are delivered when quiet hours end, with duplicate suppression by run ID. Delayed-delivery records may live with the automated run, but notification preferences have one source of truth.
 
 ## Security and privacy
 
@@ -439,9 +468,13 @@ Introduce focused tests around the new pure domain modules instead of relying on
 - Reconciliation deduplicates `(repo, PR, head SHA)`.
 - A new head SHA queues a new run.
 - Disabled and newly discovered repositories do not queue.
+- A PR with an authored `PENDING` review is skipped before diff loading or Codex execution.
 - Stale and removed assignments do not start.
+- Shared incoming-review projection supplies base SHA, head SHA, and pending-review state without per-candidate detail calls.
 - Structured-output parsing and the single repair boundary.
+- Background AI task-key routing prevents guided, layered, and automated consumers from parsing each other's results.
 - Exact diff-line and side validation.
+- Exact-line route parameters activate the existing PR detail focus behavior.
 - Fixed tone rules, including em dash and markup rejection.
 - No-concerns completion.
 - Superseded-head handling.
@@ -452,6 +485,7 @@ Introduce focused tests around the new pure domain modules instead of relying on
 
 - Safe worktree naming and path containment.
 - Remote/repository identity validation.
+- Temporary-worktree commands reuse the existing Git execution and timeout helpers.
 - Cleanup on success and failure.
 - Atomic artifact replacement.
 - Codex argument construction always includes read-only sandboxing.
@@ -465,15 +499,16 @@ Introduce focused tests around the new pure domain modules instead of relying on
 - Offline launch followed by reconnect.
 - App restart with queued and stale-running jobs.
 - Completion and failure notifications.
+- AI, notification, application-behavior, review-instruction, and local-repository preferences each retain one existing source of truth.
 - Static dependency test ensuring auto-review modules do not reference GitHub mutation command names.
 
 Existing CI continues to run typecheck, lint, frontend build, and Cargo check. The implementation adds the chosen TypeScript test runner and `cargo test --locked` to CI.
 
 ## Rollout
 
-1. Add schema, domain types, settings, and repository opt-in controls behind an `automatic reviews` feature flag that defaults off.
-2. Add reconciliation, fake-Codex tests, run history, and the cockpit UI.
-3. Add local worktree context and diff-only fallback.
+1. Add schema and domain types, extend the existing settings owners, and add repository opt-in controls behind an `automatic reviews` feature flag that defaults off.
+2. Extract the shared incoming-review projection and background AI task-key routing, then add reconciliation, fake-Codex tests, run history, and the cockpit UI.
+3. Extend the existing Git boundary with isolated worktree preparation and cleanup, then add diff-only fallback.
 4. Add tone refresh and editable profile.
 5. Add artifact export, notifications, failure recovery, and orphan cleanup.
 6. Run the app locally against a test repository with automatic posting structurally absent.
@@ -483,14 +518,19 @@ Existing CI continues to run typecheck, lint, frontend build, and Cargo check. T
 ## Acceptance criteria
 
 - Enabling a repository causes a newly assigned PR to receive one local review run for its current head SHA without user interaction.
+- A PR with an Alex-authored `PENDING` review is skipped before its diff is inspected and no local review run is created.
 - Updating the PR queues one and only one run for the new head SHA.
+- Reconciliation obtains all candidate SHAs and pending-review state through one shared incoming-review query rather than an N+1 detail-request loop.
 - Closing the window does not stop polling or an active review; choosing Quit does.
 - No automated path invokes a GitHub write endpoint.
 - Every stored finding maps to an exact current diff line and offers Copy and Open exact line.
+- Open exact line uses the existing PR detail route, active-file state, and diff focus behavior rather than a second diff implementation.
 - Runs with no findings complete and notify normally.
 - The generated comments satisfy the fixed style constraints and use recent authored reviews as tone context.
 - Worktree mode never changes the user's active clone state and always cleans up temporary worktrees.
+- Worktree mode reuses Reviewly's existing Git executable, process, timeout, repository-inspection, and worktree primitives.
 - Diff-only results are visibly labeled limited context.
 - Completed runs survive app restart and export deterministic Markdown and JSON.
 - Failures, superseded heads, export errors, and recovery states are visible and actionable.
+- AI, notification, application-behavior, review-instruction, and local-repository settings are extended in place and are not duplicated by the automated-review feature.
 - Existing manual Reviewly submission remains available only through explicit user action and confirmation.
