@@ -1,19 +1,10 @@
-import { LAYERS_KEY_PREFIX, parseLayers } from "@/lib/layers";
+import { type AiDone, classifyAiTaskKey, firstLineHint } from "@/lib/ai/tasks";
+import { parseLayers } from "@/lib/layers";
 import { subscribe } from "@/lib/tauri";
 import { useLayers } from "@/stores/layers";
 import { useLayersGen } from "@/stores/layers-gen";
 import { useEffect } from "react";
 import { toast } from "sonner";
-
-interface AiDone {
-  key: string;
-  ok: boolean;
-  output?: string;
-  error?: string;
-  provider?: string;
-  headSha?: string;
-  canceled?: boolean;
-}
 
 /**
  * Bridge the backend `ai:done` event for a LAYER-PLAN run into the stores.
@@ -29,31 +20,22 @@ export function useLayersEvents() {
     (async () => {
       unsub = await subscribe<AiDone>("ai:done", (e) => {
         const { key, ok, output, error, provider, headSha, canceled } = e.payload;
-        if (!key.startsWith(LAYERS_KEY_PREFIX)) return;
-        const prKey = key.slice(LAYERS_KEY_PREFIX.length);
+        const task = classifyAiTaskKey(key);
+        if (task.kind !== "layers") return;
+        const prKey = task.storeKey;
         const gen = useLayersGen.getState();
         gen.done(prKey);
         // Canceled by the user — just clear the pending state, no error/toast.
         if (canceled) return;
         const ref = prKey.split("/").pop() ?? prKey;
-        // Surface the model's own first line so an opaque failure (a refusal, a
-        // rate-limit, a bad model id) is actionable instead of generic.
-        const hint = (raw: string): string => {
-          const first =
-            raw
-              .trim()
-              .split("\n")
-              .find((l) => l.trim()) ?? "";
-          return first.length > 160 ? `${first.slice(0, 157)}…` : first;
-        };
         if (!ok) {
-          gen.fail(prKey, hint(error ?? "") || "The layer plan failed.");
+          gen.fail(prKey, firstLineHint(error ?? "") || "The layer plan failed.");
           toast.error(`Layering failed · ${ref}`);
           return;
         }
         const plan = parseLayers(output ?? "");
         if (!plan) {
-          const h = hint(output ?? "");
+          const h = firstLineHint(output ?? "");
           gen.fail(
             prKey,
             h

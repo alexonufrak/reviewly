@@ -1,5 +1,7 @@
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
+use std::ffi::OsString;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -54,10 +56,20 @@ async fn run_provider(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    reasoning_effort: Option<String>,
     timeout_secs: Option<u64>,
 ) -> AppResult<String> {
     match provider {
-        "codex" => run_codex(prompt, cwd, model.as_deref(), timeout_secs).await,
+        "codex" => {
+            run_codex(
+                prompt,
+                cwd,
+                model.as_deref(),
+                reasoning_effort.as_deref(),
+                timeout_secs,
+            )
+            .await
+        }
         "gemini" => run_gemini(prompt, cwd, model.as_deref(), timeout_secs).await,
         "openai" => run_openai_compatible(prompt, base_url, model, api_key, timeout_secs).await,
         _ => run_claude(prompt, cwd, model.as_deref(), timeout_secs).await,
@@ -246,9 +258,20 @@ pub async fn ai_review(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    reasoning_effort: Option<String>,
     timeout_secs: Option<u64>,
 ) -> AppResult<String> {
-    run_provider(&provider, &prompt, cwd.as_deref(), base_url, model, api_key, timeout_secs).await
+    run_provider(
+        &provider,
+        &prompt,
+        cwd.as_deref(),
+        base_url,
+        model,
+        api_key,
+        reasoning_effort,
+        timeout_secs,
+    )
+    .await
 }
 
 /// Run a review in the BACKGROUND, keyed by `key` (the PR). Returns immediately;
@@ -269,6 +292,7 @@ pub async fn ai_review_bg(
     base_url: Option<String>,
     model: Option<String>,
     api_key: Option<String>,
+    reasoning_effort: Option<String>,
     timeout_secs: Option<u64>,
 ) -> AppResult<()> {
     {
@@ -283,9 +307,17 @@ pub async fn ai_review_bg(
     let head_sha = head_sha.unwrap_or_default();
     let task_key = key.clone();
     let handle = tauri::async_runtime::spawn(async move {
-        let result =
-            run_provider(&provider, &prompt, cwd.as_deref(), base_url, model, api_key, timeout_secs)
-                .await;
+        let result = run_provider(
+            &provider,
+            &prompt,
+            cwd.as_deref(),
+            base_url,
+            model,
+            api_key,
+            reasoning_effort,
+            timeout_secs,
+        )
+        .await;
         if let Ok(mut set) = inflight.lock() {
             set.remove(&task_key);
         }
@@ -465,6 +497,7 @@ async fn run_codex(
     prompt: &str,
     cwd: Option<&str>,
     model: Option<&str>,
+    reasoning_effort: Option<&str>,
     timeout_secs: Option<u64>,
 ) -> AppResult<String> {
     // Write only the agent's final message to a temp file so we get clean
@@ -479,14 +512,7 @@ async fn run_codex(
     // Pass the prompt over stdin (`-`): avoids OS arg-length limits and codex's
     // "reading additional input from stdin" hang when a prompt arg is given.
     let mut cmd = cli_command("codex");
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
-        .arg("-s")
-        .arg("read-only")
-        .arg("--output-last-message")
-        .arg(&out_path);
-    add_model(&mut cmd, "-m", model); // codex needs -m before the `-` stdin arg
-    cmd.arg("-")
+    cmd.args(build_codex_args(&out_path, model, reasoning_effort))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -532,6 +558,34 @@ async fn run_codex(
         ));
     }
     Ok(text)
+}
+
+fn build_codex_args(
+    output_path: &Path,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Vec<OsString> {
+    let mut args = vec![
+        "exec".into(),
+        "--skip-git-repo-check".into(),
+        "-s".into(),
+        "read-only".into(),
+        "--output-last-message".into(),
+        output_path.as_os_str().to_owned(),
+    ];
+    if let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) {
+        args.push("-m".into());
+        args.push(model.into());
+    }
+    if let Some(reasoning) = reasoning_effort
+        .map(str::trim)
+        .filter(|value| matches!(*value, "minimal" | "low" | "medium" | "high" | "xhigh"))
+    {
+        args.push("-c".into());
+        args.push(format!("model_reasoning_effort=\"{reasoning}\"").into());
+    }
+    args.push("-".into());
+    args
 }
 
 /// Gemini CLI in non-interactive mode (`gemini -p`). Drop-in like Claude/Codex;
@@ -740,7 +794,17 @@ async fn stream_provider(
         "claude" => stream_claude(app, key, prompt, cwd, model.as_deref(), timeout_secs).await,
         "openai" => stream_openai(app, key, prompt, base_url, model, api_key, timeout_secs).await,
         other => {
-            let text = run_provider(other, prompt, cwd, base_url, model, api_key, timeout_secs).await?;
+            let text = run_provider(
+                other,
+                prompt,
+                cwd,
+                base_url,
+                model,
+                api_key,
+                None,
+                timeout_secs,
+            )
+            .await?;
             let _ = app.emit("ai:chunk", serde_json::json!({ "key": key, "delta": text }));
             Ok((text, None))
         }
@@ -944,6 +1008,55 @@ async fn stream_openai(
         return Err(AppError::Other("Endpoint returned no message content.".into()));
     }
     Ok((full, None))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::build_codex_args;
+
+    #[test]
+    fn codex_args_are_read_only_and_write_the_final_message() {
+        let args = build_codex_args(Path::new("/tmp/review.md"), Some("gpt-test"), None);
+        let args: Vec<String> = args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.starts_with(&[
+            "exec".into(),
+            "--skip-git-repo-check".into(),
+            "-s".into(),
+            "read-only".into(),
+            "--output-last-message".into(),
+        ]));
+        assert!(args.windows(2).any(|pair| pair == ["-m", "gpt-test"]));
+        assert_eq!(args.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn codex_args_put_reasoning_config_before_stdin() {
+        let args = build_codex_args(Path::new("/tmp/review.md"), None, Some("high"));
+        let args: Vec<String> = args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let config = args
+            .windows(2)
+            .position(|pair| pair == ["-c", "model_reasoning_effort=\"high\""])
+            .expect("reasoning config should be present");
+        let stdin = args.iter().position(|arg| arg == "-").expect("stdin marker");
+
+        assert!(config < stdin);
+    }
+
+    #[test]
+    fn codex_args_omit_empty_reasoning_config() {
+        let args = build_codex_args(Path::new("/tmp/review.md"), None, Some("  "));
+
+        assert!(!args.iter().any(|arg| arg == "-c"));
+    }
 }
 
 #[tauri::command]

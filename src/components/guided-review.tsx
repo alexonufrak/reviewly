@@ -4,6 +4,7 @@ import { KiteLoader } from "@/components/kite-loader";
 import { MarkdownBody } from "@/components/markdown-body";
 import { Button } from "@/components/ui/button";
 import { CLONE_ABSENT_CLAUSE, GUIDED_SYSTEM } from "@/lib/ai/prompts";
+import { guidedKey } from "@/lib/ai/tasks";
 import { useAiAvailable } from "@/lib/ai/use-ai-available";
 import { parsePatch } from "@/lib/diff";
 import { relativeTime } from "@/lib/format";
@@ -149,7 +150,7 @@ export function GuidedReview({
   useEffect(() => {
     invoke<string[]>("ai_inflight")
       .then((keys) => {
-        if (keys.includes(prKey)) useGuidedGen.getState().start(prKey);
+        if (keys.includes(guidedKey(prKey))) useGuidedGen.getState().start(prKey);
       })
       .catch(() => {});
   }, [prKey]);
@@ -169,7 +170,7 @@ export function GuidedReview({
       : "";
     useGuidedGen.getState().start(prKey);
     invoke("ai_review_bg", {
-      key: prKey,
+      key: guidedKey(prKey),
       ...aiInvokeArgs(),
       headSha: headSha ?? "",
       cwd,
@@ -195,7 +196,7 @@ export function GuidedReview({
 
   // Stop a running generation (kills the AI CLI on the backend).
   const cancel = useCallback(() => {
-    invoke("ai_cancel", { key: prKey }).catch(() => {});
+    invoke("ai_cancel", { key: guidedKey(prKey) }).catch(() => {});
     useGuidedGen.getState().done(prKey);
   }, [prKey]);
 

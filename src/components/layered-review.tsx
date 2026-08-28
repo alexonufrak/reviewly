@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { buildLayerContext } from "@/lib/ai/context";
 import { LAYERED_SYSTEM } from "@/lib/ai/prompts";
+import { layersKey } from "@/lib/ai/tasks";
 import { useAiAvailable } from "@/lib/ai/use-ai-available";
 import {
   type LayerPlan,
@@ -13,7 +14,6 @@ import {
   heuristicLayers,
   isPlanStale,
   layerStats,
-  layersKey,
   reconcileLayers,
 } from "@/lib/layers";
 import type { PullFile } from "@/lib/tauri";
