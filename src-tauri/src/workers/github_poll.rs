@@ -127,7 +127,8 @@ pub async fn run(app: AppHandle) {
         // Granular desktop notifications. The search above drives the UI; OS
         // alerts come from the Notifications API so every reason
         // (review/mention/comment/CI) passes through one reason filter.
-        let notify_on = state.notify_enabled.load(Ordering::Relaxed);
+        let notify_on = state.notify_enabled.load(Ordering::Relaxed)
+            && !crate::commands::notifications::notifications_quiet_now(&state);
         if notify_on && !prev_notify_on {
             // Just (re)enabled → re-prime so we don't blast the current backlog.
             notif_first = true;

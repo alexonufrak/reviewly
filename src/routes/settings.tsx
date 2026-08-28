@@ -1,3 +1,4 @@
+import { AutomaticReviewSettingsSection } from "@/components/auto-review/repo-settings";
 import { Card } from "@/components/card";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { ContributionHeatmap } from "@/components/contribution-heatmap";
@@ -204,6 +205,8 @@ export function SettingsPage() {
             </Card>
           </CollapsibleSection>
 
+          <AutomaticReviewSettingsSection />
+
           <AppearanceSection />
           <CodeReviewSection />
           <GuidedTourSection />
@@ -274,8 +277,8 @@ function AiInstructions() {
         </span>
       </div>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        Your review style + house rules, sent with every AI review and chat. e.g. “Be terse. Flag
-        missing tests and error handling. Prefer composition over inheritance.”
+        Your engineering guidance, sent with every AI review and chat. Automatic reviews apply it
+        before their fixed safety and style rules.
       </p>
       <Textarea
         value={value}
@@ -596,6 +599,12 @@ function NotificationsSection() {
   const setReason = useNotifSettings((s) => s.setReason);
   const pollSecs = useNotifSettings((s) => s.pollSecs);
   const setPollSecs = useNotifSettings((s) => s.setPollSecs);
+  const quietHoursEnabled = useNotifSettings((s) => s.quietHoursEnabled);
+  const setQuietHoursEnabled = useNotifSettings((s) => s.setQuietHoursEnabled);
+  const quietHoursStart = useNotifSettings((s) => s.quietHoursStart);
+  const setQuietHoursStart = useNotifSettings((s) => s.setQuietHoursStart);
+  const quietHoursEnd = useNotifSettings((s) => s.quietHoursEnd);
+  const setQuietHoursEnd = useNotifSettings((s) => s.setQuietHoursEnd);
   return (
     <CollapsibleSection id="notifications" title="Notifications" icon={Bell}>
       <Card className="space-y-4">
@@ -640,6 +649,40 @@ function NotificationsSection() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-3 border-t border-hairline pt-4">
+              <SettingToggle
+                label="Quiet hours"
+                description="Silence desktop alerts during a local-time window. Overnight windows are supported."
+                checked={quietHoursEnabled}
+                onChange={setQuietHoursEnabled}
+              />
+              {quietHoursEnabled && (
+                <div className="flex justify-end gap-3">
+                  {/* biome-ignore lint/a11y/noLabelWithoutControl: Input renders the native control */}
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-muted-foreground">Start</span>
+                    <Input
+                      type="time"
+                      value={quietHoursStart}
+                      onChange={(event) => setQuietHoursStart(event.target.value)}
+                      size="sm"
+                      className="w-28"
+                    />
+                  </label>
+                  {/* biome-ignore lint/a11y/noLabelWithoutControl: Input renders the native control */}
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-muted-foreground">End</span>
+                    <Input
+                      type="time"
+                      value={quietHoursEnd}
+                      onChange={(event) => setQuietHoursEnd(event.target.value)}
+                      size="sm"
+                      className="w-28"
+                    />
+                  </label>
+                </div>
+              )}
             </div>
           </>
         )}

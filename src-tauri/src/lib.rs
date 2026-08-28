@@ -217,6 +217,7 @@ pub fn run() {
             commands::notifications::set_notifications_enabled,
             commands::notifications::set_notification_reasons,
             commands::notifications::set_poll_interval,
+            commands::notifications::set_notification_quiet_hours,
             commands::notifications::gh_list_notifications,
             commands::notifications::gh_mark_notification_read,
             commands::actions::gh_mark_all_notifications_read,

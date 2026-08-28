@@ -1,3 +1,4 @@
+import { parseLocalTime } from "@/lib/quiet-hours";
 import { invoke } from "@/lib/tauri";
 import { useNotifSettings } from "@/stores/notif-settings";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
@@ -12,6 +13,9 @@ export function useNotifSync() {
   const enabled = useNotifSettings((s) => s.desktopEnabled);
   const reasons = useNotifSettings((s) => s.reasons);
   const pollSecs = useNotifSettings((s) => s.pollSecs);
+  const quietHoursEnabled = useNotifSettings((s) => s.quietHoursEnabled);
+  const quietHoursStart = useNotifSettings((s) => s.quietHoursStart);
+  const quietHoursEnd = useNotifSettings((s) => s.quietHoursEnd);
 
   // Push the granular reason filter + poll interval to the Rust poller.
   useEffect(() => {
@@ -24,6 +28,17 @@ export function useNotifSync() {
   useEffect(() => {
     void invoke("set_poll_interval", { secs: pollSecs });
   }, [pollSecs]);
+
+  useEffect(() => {
+    const startMinutes = parseLocalTime(quietHoursStart);
+    const endMinutes = parseLocalTime(quietHoursEnd);
+    if (startMinutes == null || endMinutes == null) return;
+    void invoke("set_notification_quiet_hours", {
+      enabled: quietHoursEnabled,
+      startMinutes,
+      endMinutes,
+    });
+  }, [quietHoursEnabled, quietHoursStart, quietHoursEnd]);
 
   useEffect(() => {
     void invoke("set_notifications_enabled", { enabled });

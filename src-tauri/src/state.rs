@@ -39,6 +39,11 @@ pub struct AppState {
     pub notify_reasons: Mutex<HashSet<String>>,
     /// Desktop-poll interval in seconds. Mirrors Settings.
     pub notify_poll_secs: AtomicU64,
+    /// Whether OS notifications are suppressed during the configured local-time window.
+    pub notify_quiet_enabled: AtomicBool,
+    /// Quiet-hours start and end in minutes after local midnight.
+    pub notify_quiet_start_minutes: AtomicU64,
+    pub notify_quiet_end_minutes: AtomicU64,
 }
 
 impl AppState {
@@ -97,6 +102,9 @@ impl AppState {
                     .collect(),
             ),
             notify_poll_secs: AtomicU64::new(60),
+            notify_quiet_enabled: AtomicBool::new(false),
+            notify_quiet_start_minutes: AtomicU64::new(18 * 60),
+            notify_quiet_end_minutes: AtomicU64::new(8 * 60),
         }
     }
 }

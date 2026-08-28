@@ -74,6 +74,12 @@ const dependabotRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/dependabot"), "DependabotPage"),
 });
 
+const reviewInboxRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/review-inbox",
+  component: lazyRouteComponent(() => import("@/routes/review-inbox"), "ReviewInboxPage"),
+});
+
 const reposRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/repos",
@@ -108,6 +114,7 @@ const routeTree = rootRoute.addChildren([
   repoDetailRoute,
   notificationsRoute,
   dependabotRoute,
+  reviewInboxRoute,
   settingsRoute,
   chatRoute,
 ]);

@@ -2,7 +2,13 @@ import { sqlStorage } from "@/lib/sql-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type LandingPage = "/" | "/prs" | "/repos" | "/notifications" | "/dependabot";
+export type LandingPage =
+  | "/"
+  | "/prs"
+  | "/repos"
+  | "/notifications"
+  | "/dependabot"
+  | "/review-inbox";
 
 interface State {
   /** Ask for a confirmation before a review is actually submitted to GitHub. */
@@ -41,4 +47,5 @@ export const LANDING_OPTIONS: { value: LandingPage; label: string }[] = [
   { value: "/repos", label: "Repositories" },
   { value: "/notifications", label: "Notifications" },
   { value: "/dependabot", label: "Dependabot" },
+  { value: "/review-inbox", label: "Review inbox" },
 ];

@@ -1,8 +1,15 @@
+import {
+  type AutomatedCodexConfig,
+  type AutomatedCodexOverrides,
+  type CodexReasoningEffort,
+  resolveAutomatedCodexConfig,
+} from "@/lib/auto-review/config";
 import { sqlStorage } from "@/lib/sql-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type AiProvider = "claude" | "codex" | "gemini" | "openai";
+export type { CodexReasoningEffort } from "@/lib/auto-review/config";
 
 /** Providers that are a local CLI on PATH (vs. the HTTP OpenAI-compatible one). */
 export const CLI_PROVIDERS: AiProvider[] = ["claude", "codex", "gemini"];
@@ -52,6 +59,9 @@ interface State {
   /** Optional model override per CLI provider (claude/codex/gemini). Empty = the CLI's own default. */
   cliModels: Partial<Record<AiProvider, string>>;
   setCliModel: (provider: AiProvider, model: string) => void;
+  /** Optional reasoning override for Codex. Empty keeps the CLI/model default. */
+  codexReasoningEffort: CodexReasoningEffort;
+  setCodexReasoningEffort: (effort: CodexReasoningEffort) => void;
   /** How long an AI run may take before it's stopped, in seconds. `null` =
    * automatic (the backend picks 3 min, or 7 min when the PR's clone is present). */
   aiTimeoutSecs: number | null;
@@ -70,12 +80,32 @@ export const useAiProvider = create<State>()(
       cliModels: {},
       setCliModel: (provider, model) =>
         set((s) => ({ cliModels: { ...s.cliModels, [provider]: model } })),
+      codexReasoningEffort: "",
+      setCodexReasoningEffort: (codexReasoningEffort) => set({ codexReasoningEffort }),
       aiTimeoutSecs: null,
       setAiTimeoutSecs: (aiTimeoutSecs) => set({ aiTimeoutSecs }),
     }),
     { name: "reviewly.ai", storage: sqlStorage<State>() },
   ),
 );
+
+/** Codex-only configuration for automatic review. This intentionally ignores
+ * the provider selected for manual AI features. Repository values are optional
+ * overrides; blank values inherit the app-level Codex defaults. */
+export function codexInvokeArgs(overrides?: {
+  model?: AutomatedCodexOverrides["model"];
+  reasoning?: AutomatedCodexOverrides["reasoning"];
+}): AutomatedCodexConfig {
+  const state = useAiProvider.getState();
+  return resolveAutomatedCodexConfig(
+    {
+      model: state.cliModels.codex,
+      reasoning: state.codexReasoningEffort,
+      timeoutSecs: state.aiTimeoutSecs,
+    },
+    overrides,
+  );
+}
 
 /**
  * Extra invoke args for the `ai_review` / `ai_review_bg` commands. Carries the
