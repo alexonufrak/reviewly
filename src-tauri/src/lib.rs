@@ -3,6 +3,7 @@ mod clients;
 mod commands;
 mod creds;
 mod error;
+mod migrations;
 mod state;
 mod tray;
 mod workers;
@@ -21,120 +22,7 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    let migrations = vec![
-        tauri_plugin_sql::Migration {
-            version: 1,
-            description: "kv + review_drafts",
-            sql: r#"
-            CREATE TABLE IF NOT EXISTS kv (
-                k TEXT PRIMARY KEY,
-                v TEXT NOT NULL,
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
-            );
-            CREATE TABLE IF NOT EXISTS review_drafts (
-                pr_key      TEXT PRIMARY KEY,
-                body        TEXT NOT NULL DEFAULT '',
-                comments    TEXT NOT NULL DEFAULT '[]',
-                updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
-            );
-        "#,
-            kind: tauri_plugin_sql::MigrationKind::Up,
-        },
-        tauri_plugin_sql::Migration {
-            version: 2,
-            description: "pr_cache (local PR mirror)",
-            sql: r#"
-            CREATE TABLE IF NOT EXISTS pr_cache (
-                scope       TEXT NOT NULL,
-                pr_id       INTEGER NOT NULL,
-                updated_at  TEXT NOT NULL DEFAULT '',
-                state       TEXT NOT NULL DEFAULT '',
-                data        TEXT NOT NULL,
-                synced_at   INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
-                PRIMARY KEY (scope, pr_id)
-            );
-            CREATE INDEX IF NOT EXISTS pr_cache_scope_updated
-                ON pr_cache (scope, updated_at DESC);
-        "#,
-            kind: tauri_plugin_sql::MigrationKind::Up,
-        },
-        tauri_plugin_sql::Migration {
-            version: 3,
-            description: "pull_requests (accumulating per-id base for lists + analytics)",
-            sql: r#"
-            CREATE TABLE IF NOT EXISTS pull_requests (
-                id           INTEGER PRIMARY KEY,
-                repo         TEXT NOT NULL DEFAULT '',
-                author       TEXT NOT NULL DEFAULT '',
-                state        TEXT NOT NULL DEFAULT '',
-                created_at   TEXT,
-                merged_at    TEXT,
-                closed_at    TEXT,
-                last_seen    INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
-            );
-            CREATE INDEX IF NOT EXISTS pull_requests_created ON pull_requests (created_at);
-            CREATE INDEX IF NOT EXISTS pull_requests_merged  ON pull_requests (merged_at);
-            CREATE INDEX IF NOT EXISTS pull_requests_closed  ON pull_requests (closed_at);
-            CREATE INDEX IF NOT EXISTS pull_requests_repo    ON pull_requests (repo);
-        "#,
-            kind: tauri_plugin_sql::MigrationKind::Up,
-        },
-        tauri_plugin_sql::Migration {
-            version: 4,
-            description: "pull_requests.is_draft (drafts trend series)",
-            sql: "ALTER TABLE pull_requests ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0;",
-            kind: tauri_plugin_sql::MigrationKind::Up,
-        },
-        tauri_plugin_sql::Migration {
-            version: 5,
-            description: "prs (local-first list source) + repo_sync (per-repo watermark)",
-            sql: r#"
-            CREATE TABLE IF NOT EXISTS prs (
-                id             INTEGER PRIMARY KEY,
-                repo           TEXT NOT NULL,
-                number         INTEGER NOT NULL,
-                title          TEXT NOT NULL DEFAULT '',
-                state          TEXT NOT NULL DEFAULT 'open',
-                draft          INTEGER NOT NULL DEFAULT 0,
-                merged_at      TEXT,
-                author_login   TEXT NOT NULL DEFAULT '',
-                author_avatar  TEXT NOT NULL DEFAULT '',
-                author_url     TEXT NOT NULL DEFAULT '',
-                author_id      INTEGER NOT NULL DEFAULT 0,
-                created_at     TEXT NOT NULL DEFAULT '',
-                updated_at     TEXT NOT NULL DEFAULT '',
-                html_url       TEXT NOT NULL DEFAULT '',
-                repository_url TEXT,
-                body           TEXT,
-                labels         TEXT NOT NULL DEFAULT '[]',
-                head_ref       TEXT,
-                base_ref       TEXT,
-                synced_at      INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
-            );
-            CREATE INDEX IF NOT EXISTS prs_repo_state   ON prs (repo, state);
-            CREATE INDEX IF NOT EXISTS prs_repo_updated ON prs (repo, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS prs_merged       ON prs (merged_at);
-
-            CREATE TABLE IF NOT EXISTS repo_sync (
-                repo           TEXT PRIMARY KEY,
-                open_synced_at INTEGER,
-                updated_high   TEXT,
-                all_backfilled INTEGER NOT NULL DEFAULT 0,
-                last_error     TEXT
-            );
-        "#,
-            kind: tauri_plugin_sql::MigrationKind::Up,
-        },
-        tauri_plugin_sql::Migration {
-            version: 6,
-            description: "consolidate: drop pull_requests + pr_cache (prs is the single source)",
-            sql: r#"
-            DROP TABLE IF EXISTS pull_requests;
-            DROP TABLE IF EXISTS pr_cache;
-        "#,
-            kind: tauri_plugin_sql::MigrationKind::Up,
-        },
-    ];
+    let migrations = migrations::migrations();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
