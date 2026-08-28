@@ -40,6 +40,7 @@ describe("automatic review candidates", () => {
       baseSha: "base-12",
       headSha: "head-12",
       hasPendingReview: true,
+      isDraft: false,
     });
   });
 

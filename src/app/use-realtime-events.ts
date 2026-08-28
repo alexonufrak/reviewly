@@ -1,3 +1,5 @@
+import { AUTO_REVIEW_WAKE_EVENT } from "@/lib/auto-review/coordinator";
+import type { AutoReviewTrigger } from "@/lib/auto-review/types";
 import { syncWatched } from "@/lib/sync";
 import type { Viewer } from "@/lib/tauri";
 import { invoke, subscribe } from "@/lib/tauri";
@@ -18,6 +20,10 @@ export function useRealtimeEvents() {
 
   useEffect(() => {
     let unsubs: Array<() => void> = [];
+
+    const wakeAutoReview = (trigger: AutoReviewTrigger) => {
+      window.dispatchEvent(new CustomEvent(AUTO_REVIEW_WAKE_EVENT, { detail: trigger }));
+    };
 
     // GitHub moved → for watched repos, reconcile the local DB (sync owns the
     // ["prs","db"] invalidation); otherwise refetch the search-backed list.
@@ -40,6 +46,7 @@ export function useRealtimeEvents() {
       const u1 = await subscribe<number[]>("pr:new", () => {
         refresh();
         qc.invalidateQueries({ queryKey: ["notifications"] });
+        wakeAutoReview("assignment");
       });
       const u2 = await subscribe<number>("pr:tick", (event) => {
         // Total pending-review count every cycle → menu-bar tray only. We no
@@ -53,6 +60,7 @@ export function useRealtimeEvents() {
       // Only reconcile when the poller's delta saw real changes.
       const u5 = await subscribe<number>("pr:changed", () => {
         refresh();
+        wakeAutoReview("head_changed");
       });
       // Targeted: the poller saw movement in specific watched repos → reconcile
       // just those into the local DB (sync owns the ["prs","db"] invalidation).

@@ -170,6 +170,36 @@ describe("automated review persistence", () => {
     expect(runs.map((run) => run.status)).toEqual(["queued", "running"]);
   });
 
+  test("records the execution context and resolved Codex settings", async () => {
+    const { repository } = setup();
+    const run = await repository.enqueueCandidate(candidate(), "assignment");
+    expect(run).not.toBeNull();
+    await repository.claimNextQueuedRun();
+
+    await repository.setRunExecution(run?.id as string, {
+      contextMode: "diff_only",
+      model: "gpt-review",
+      reasoning: "high",
+    });
+
+    expect((await repository.getRunDetail(run?.id as string))?.run).toMatchObject({
+      contextMode: "diff_only",
+      model: "gpt-review",
+      reasoning: "high",
+    });
+  });
+
+  test("allows exactly one repair attempt for a running review", async () => {
+    const { repository } = setup();
+    const run = await repository.enqueueCandidate(candidate(), "assignment");
+    expect(run).not.toBeNull();
+    await repository.claimNextQueuedRun();
+
+    expect(await repository.consumeRepairAttempt(run?.id as string)).toBe(true);
+    expect(await repository.consumeRepairAttempt(run?.id as string)).toBe(false);
+    expect((await repository.getRunDetail(run?.id as string))?.run.repairCount).toBe(1);
+  });
+
   test("retries a failed run without creating another row", async () => {
     const { repository, setNow } = setup();
     const run = await repository.enqueueCandidate(candidate(), "assignment");

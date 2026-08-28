@@ -4,6 +4,7 @@ import { Sidebar } from "@/app/sidebar";
 import { TitleBar } from "@/app/title-bar";
 import { useAppBehaviorSync } from "@/app/use-app-behavior-sync";
 import { useAuthBootstrap } from "@/app/use-auth-bootstrap";
+import { useAutoReview } from "@/app/use-auto-review";
 import { useClipboardSniff } from "@/app/use-clipboard-sniff";
 import { useDependabotEvents } from "@/app/use-dependabot-events";
 import { useGlobalShortcuts } from "@/app/use-global-shortcuts";
@@ -77,6 +78,7 @@ function useAppliedAppearance() {
 
 export function AppLayout({ children }: { children: ReactNode }) {
   useAuthBootstrap();
+  useAutoReview();
   useGlobalShortcuts();
   useClipboardSniff();
   useRealtimeEvents();

@@ -39,6 +39,15 @@ export interface AutoReviewDb {
   ): Promise<AutoReviewRun | null>;
   listRuns(): Promise<AutoReviewRun[]>;
   claimNextQueuedRun(): Promise<AutoReviewRun | null>;
+  setRunExecution(
+    id: string,
+    execution: {
+      contextMode: AutoReviewContextMode;
+      model: string | null;
+      reasoning: string | null;
+    },
+  ): Promise<void>;
+  consumeRepairAttempt(id: string): Promise<boolean>;
   retryRun(id: string): Promise<void>;
   completeRun(input: CompleteRunInput): Promise<void>;
   failRun(input: FailRunInput): Promise<void>;
@@ -255,6 +264,26 @@ export function createAutoReviewDb(
         [dependencies.now()],
       );
       return rows[0] ? toRun(rows[0]) : null;
+    },
+    async setRunExecution(id, execution) {
+      const client = await loadClient();
+      await client.execute(
+        `UPDATE auto_review_runs
+         SET context_mode = $1, model = $2, reasoning = $3
+         WHERE id = $4 AND status = 'running'`,
+        [execution.contextMode, execution.model, execution.reasoning, id],
+      );
+    },
+    async consumeRepairAttempt(id) {
+      const client = await loadClient();
+      const rows = await client.select<Array<{ id: string }>>(
+        `UPDATE auto_review_runs
+         SET repair_count = repair_count + 1
+         WHERE id = $1 AND status = 'running' AND repair_count = 0
+         RETURNING id`,
+        [id],
+      );
+      return rows.length === 1;
     },
     async retryRun(id) {
       const client = await loadClient();

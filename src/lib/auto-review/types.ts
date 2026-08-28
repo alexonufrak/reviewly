@@ -16,6 +16,7 @@ export interface ReviewCandidate {
   baseSha: string;
   headSha: string;
   hasPendingReview: boolean;
+  isDraft?: boolean;
 }
 
 export type AutoReviewCategory =

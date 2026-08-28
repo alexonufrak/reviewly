@@ -23,6 +23,7 @@ export function toReviewCandidate(pr: DashboardPr): ReviewCandidate {
     baseSha: pr.baseSha,
     headSha: pr.headSha,
     hasPendingReview: pr.hasPendingReview,
+    isDraft: pr.isDraft,
   };
 }
 
